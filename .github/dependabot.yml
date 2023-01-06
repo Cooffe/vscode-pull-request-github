@@ -1,0 +1,161 @@
+# Basic set up for three package managers
+
+version: ""
+updates:
+
+  # Maintain dependencies for GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Maintain dependencies for npm
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Maintain dependencies for Composer
+  - package-ecosystem: "composer"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # directory
+
+  # Specify location of manifest files for each package manager
+
+  version: ""
+  updates:
+ 
+  - package-ecosystem: "composer"
+   # Files stored in repository root
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "npm"
+   # Files stored in `app` directory
+    directory: "/app"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+  - Workflow files stored in the
+  - default location of `.github/workflows`nterval types Frequency
+    daily -	Runs on every weekday, Monday to Friday.
+    weekl - Runs once each week. By default, this is on Monday. To modify this, use schedule.day.
+    monthly - Runs once each month. This is on the first day of the month.
+
+# Set update schedule for each package manager
+
+   - version: ""
+   - updates:
+
+   - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      # Check for updates to GitHub Actions every weekday
+      interval: "daily"
+
+  - package-ecosystem: "composer"
+    directory: "/"
+    schedule:
+      # Check for updates managed by Composer once a week
+      interval: "weekly"
+
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      
+    ## schedule.interval
+    - Required.
+      You must define how often to check for new versions for each package manager.
+      By default, Dependabot randomly assigns a time to apply all the updates in the configuration file. 
+      To set a specific time, you can use schedule.time and schedule.timezone.
+     
+     # allow
+    By default all dependencies that are explicitly defined in a manifest are kept up to date by Dependabot version updates.
+    In addition, Dependabot security updates also update vulnerable dependencies that are defined in lock files.
+    You can use allow and ignore to customize which dependencies to maintain.
+    Dependabot checks for all allowed dependencies and then filters out any ignored dependencies or versions.
+    So a dependency that is matched by both an allow and an ignore will be ignored.
+
+    Use the allow option to customize which dependencies are updated. This applies to both version and security updates.
+    You can use the following options: 
+    dependency-name—use to allow updates for dependencies with matching names, optionally using * to match zero or more characters.
+    For Java dependencies, the format of the dependency-name attribute is: groupId:artifactId, for example: org.kohsuke:github-api.
+
+    dependency-type—use to allow updates for dependencies of specific types.
+    Dependency types	Supported by package managers	Allow updates
+    direct	All	All explicitly defined dependencies.
+    indirect	bundler, pip, composer, cargo	Dependencies of direct dependencies (also known as sub-dependencies, or transient dependencies).
+    all	All	All explicitly defined dependencies. For bundler, pip, composer, cargo, also the dependencies of direct dependencies.
+    production	bundler, composer, mix, maven, npm, pip	Only dependencies in the "Production dependency group".
+    development	bundler, composer, mix, maven, npm, pip	Only dependencies in the "Development dependency group".
+
+# Use `allow` to specify which dependencies to maintain
+
+version: ""
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    allow:
+      # Allow updates for Lodash
+      - dependency-name: "lodash"
+      # Allow updates for React and any packages starting "react"
+      - dependency-name: "react*"
+
+  - package-ecosystem: "composer"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    allow:
+      # Allow both direct and indirect updates for all packages
+      - dependency-type: "all"
+
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    allow:
+      # Allow only direct updates for
+      # Django and any packages starting "django"
+      - dependency-name: "django*"
+        dependency-type: "direct"
+      # Allow only production updates for Sphinx
+      - dependency-name: "sphinx"
+        dependency-type: "production"
+        
+    # assignees
+       - Use assignees to specify individual assignees for all pull requests raised for a package manager.
+       - Setting this option will also affect pull requests for security updates to the manifest files of this package manager,
+         unless you use target-branch to check for version updates on a non-default branch.
+
+# Specify assignees for pull requests.
+
+version: ""
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Add assignees
+    assignees:
+      - "octocat"
+    
+    # ignore
+- By default all dependencies that are explicitly defined in a manifest are kept up to date by Dependabot version updates.
+- In addition, Dependabot security updates also update vulnerable dependencies that are defined in lock files.
+- You can use allow and ignore to customize which dependencies to maintain.
+- Dependabot checks for all allowed dependencies and then filters out any ignored dependencies or versions.
+- So a dependency that is matched by both an allow and an ignore will be ignored.
+- Dependencies can be ignored either by adding them to ignore or by using the @dependabot ignore command on a pull request opened by Dependabot.
+- Creating ignore conditions from @dependabot ignore
+- Dependencies ignored by using the @dependabot ignore command are stored centrally for each package manager.
+- If you start ignoring dependencies in the dependabot.yml file, these existing preferences are considered alongside the ignore dependencies in the configuration.
+- You can check whether a repository has stored ignore preferences by searching the repository for "@dependabot ignore" in:comments.
+- If you wish to un-ignore a dependency ignored this way, re-open the pull request.
+- For more information about the @dependabot ignore commands, see "Managing pull requests for dependency updates."
