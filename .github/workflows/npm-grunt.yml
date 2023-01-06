@@ -1,0 +1,79 @@
+name: NodeJS with Grunt
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [14.x, 16.x, 18.x]
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ matrix.node-version }}
+
+    - name: Build
+      run: |
+        npm install
+        grunt
+        
+# Allow external code execution when updating dependencies from private registries.
+
+concurrency: ""
+env:
+  ruby-github:
+    type: rubygems-server
+    url: https://rubygems.pkg.github.com/octocat/github_api
+    token: ${{secrets.MY_GITHUB_PERSONAL_TOKEN}}
+defaults:
+  - package-ecosystem: "bundler"
+    directory: "/rubygems-server"
+    insecure-external-code-execution: allow
+    registries: "*"
+    schedule:
+      interval: "monthly"
+# Specify labels for pull requests
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+ # Specify labels for npm pull requests
+    labels:
+      - "npm"
+      - "dependencies"
+
+# Specify a milestone for pull requests
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+# Associate pull requests with milestone "4"
+    milestone: 4
+# Specify the number of open pull requests allowed
+
+run-name: 2
+permissions:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+ # Disable version updates for npm dependencies
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+ # Allow up to 10 open pull requests for pip dependencies
+    open-pull-requests-limit: 10
+
