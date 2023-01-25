@@ -547,10 +547,9 @@ export class FolderRepositoryManager implements vscode.Disposable {
 
 		if (activeRemotes.length) {
 			await vscode.commands.executeCommand('setContext', 'github:hasGitHubRemotes', true);
-			Logger.appendLine('Found GitHub remote');
+			Logger.appendLine(`Found GitHub remote for folder ${this.repository.rootUri.fsPath}`);
 		} else {
-			await vscode.commands.executeCommand('setContext', 'github:hasGitHubRemotes', false);
-			Logger.appendLine('No GitHub remotes found');
+			Logger.appendLine(`No GitHub remotes found for folder ${this.repository.rootUri.fsPath}`);
 		}
 
 		return activeRemotes;
@@ -2214,7 +2213,9 @@ export class FolderRepositoryManager implements vscode.Disposable {
 			return existing;
 		}
 		const uri = `https://github.com/${owner}/${repositoryName}`;
-		return this.createAndAddGitHubRepository(new Remote(repositoryName, uri, new Protocol(uri)), this._credentialStore);
+		const gitRemotes = parseRepositoryRemotes(this.repository);
+		const gitRemote = gitRemotes.find(r => r.owner === owner && r.repositoryName === repositoryName);
+		return this.createAndAddGitHubRepository(new Remote(gitRemote?.remoteName ?? repositoryName, uri, new Protocol(uri)), this._credentialStore);
 	}
 
 	async findUpstreamForItem(item: {
