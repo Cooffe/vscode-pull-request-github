@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.58.0
+
+### Changes
+
+- Changes can be suggested and accepted from within editor comments
+
+<video src="documentation/changelog/0.58.0/suggest-a-change.mp4" placeholder="documentation/changelog/0.58.0/suggest-a-change.mp4" autoplay loop controls muted title="Make a suggestion">
+    Sorry, your browser doesn't support HTML 5 video.
+</video>
+
+- The setting `githubPullRequests.defaultCommentType` controls whether the default comment type is a single comment or a review comment.
+- `"githubPullRequests.postCreate": "checkoutDefaultBranch"` will cause the default branch to be checked out after creating a PR.
+- Section headings (assignees, reviewers, lables, and milestones) are clickable in the PR overview.
+- The commands pr.openModifiedFile pr.openDiffView can be executed with a keyboard shortcut on the active file.
+- GitHub handles in comments are now linkified.
+- Setting `"githubPullRequests.createDraft": true` will make created PRs default to drafts.
+- Permalinks can be created for non-text, rendered, files.
+- Labels can be added to PRs at creation time
+
+![Create a PR with labels](documentation/changelog/0.58.0/create-with-labels.png)
+
+- A progress notification shows during PR creation.
+- Branches and remotes for PRs that are made from a fork and are checked out from the "Pull Requests" view will be automatically cleaned up when the default branch is checked out using the "Checkout default branch" button.
+- An experimental setting `githubPullRequests.experimental.quickDiff` will show the quick diff widget in the editor gutter for changed lines in a checked out PR.
+
+### Fixes
+
+- Using the enter key while renaming a PR should save the title. https://github.com/microsoft/vscode-pull-request-github/issues/4402
+- JSDoc hover for @return shows GHPRI username hover. https://github.com/microsoft/vscode-pull-request-github/issues/4344
+- Some text is not visible in high contrast mode. https://github.com/microsoft/vscode-pull-request-github/issues/4287
+- Empty diff view after reloading. https://github.com/microsoft/vscode-pull-request-github/issues/4293
+- Error signing in to Github. Try Again doesn't try again. https://github.com/microsoft/vscode-pull-request-github/issues/4148
+- Other accessibility fixes. https://github.com/microsoft/vscode-pull-request-github/issues/4237
+
+**_Thank You_**
+
+* [@eamodio (Eric Amodio)](https://github.com/eamodio): Updates TypeScript (released 4.2) and Octokit (to get fixed types), and a couple minor others [PR #2525](https://github.com/microsoft/vscode-pull-request-github/pull/2525)
+* [@sravan1946 (sravan)](https://github.com/sravan1946): Remove unavailable badge from readme [PR #4393](https://github.com/microsoft/vscode-pull-request-github/pull/4393)
+* [@Thomas1664](https://github.com/Thomas1664)
+  * Fix comment layout & use bin as delete icon [PR #4285](https://github.com/microsoft/vscode-pull-request-github/pull/4285)
+  * Colorize status badge [PR #4286](https://github.com/microsoft/vscode-pull-request-github/pull/4286)
+  * UI fixes for PR view [PR #4368](https://github.com/microsoft/vscode-pull-request-github/pull/4368)
+  * Use correct permission to show 'assign yourself' in PR view sidebar [PR #4369](https://github.com/microsoft/vscode-pull-request-github/pull/4369)
+  * Fix UI for PR draft status check entry [PR #4370](https://github.com/microsoft/vscode-pull-request-github/pull/4370)
+
+
 ## 0.56.0
 
 ### Changes
@@ -40,7 +86,7 @@
 - Pull Requests can be submitted from the "Create" view by doing `ctrl/cmd+enter` while your cursor is in the description input box.
 - Keybindings are supported for "Mark File as Viewed" (`pr.markFileAsViewed`). When "Mark File as Viewed" is run from a command or from the editor toolbar the file will also be closed. Tip: Use with "Open All Diffs" for quickly going through a PR review.
 - Checked-out pull requests with less than 20 files will have all the diffs pre-fetched for faster diff-opening times.
-- String in VS Code UI have been configured for localization. Strings in webviews (such as the "Create" view and the PR description/overview) are still not localized.
+- Strings in VS Code UI have been configured for localization. Strings in webviews (such as the "Create" view and the PR description/overview) are still not localized.
 
 ### Fixes
 
