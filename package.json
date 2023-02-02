@@ -21,7 +21,7 @@
 		"contribCommentEditorActionsMenu",
 		"quickDiffProvider"
 	],
-	"version": "0.56.0",
+	"version": "0.58.0",
 	"publisher": "GitHub",
 	"engines": {
 		"vscode": "^1.75.0"
@@ -34,7 +34,6 @@
 	],
 	"activationEvents": [
 		"onStartupFinished",
-		"onCommand:github.api.preloadPullRequest",
 		"onFileSystem:newIssue",
 		"onFileSystem:pr",
 		"onFileSystem:githubpr",
