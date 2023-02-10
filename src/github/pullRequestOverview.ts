@@ -335,6 +335,9 @@ export class PullRequestOverviewPanel extends IssueOverviewPanel<PullRequestMode
 			case 'pr.gotoChangesSinceReview':
 				this.gotoChangesSinceReview();
 				break;
+			case 'pr.re-request-review':
+				this.reRequestReview(message);
+				break;
 		}
 	}
 
@@ -715,7 +718,7 @@ export class PullRequestOverviewPanel extends IssueOverviewPanel<PullRequestMode
 			await vscode.workspace.fs.delete(tempUri);
 			vscode.window.showInformationMessage('Patch applied!');
 		} catch (e) {
-			Logger.appendLine(`Applying patch failed: ${e}`);
+			Logger.error(`Applying patch failed: ${e}`, PullRequestOverviewPanel.ID);
 			vscode.window.showErrorMessage(`Applying patch failed: ${formatError(e)}`);
 		}
 	}
@@ -725,7 +728,7 @@ export class PullRequestOverviewPanel extends IssueOverviewPanel<PullRequestMode
 			const comment = message.args.comment;
 			return PullRequestModel.openDiffFromComment(this._folderRepositoryManager, this._item, comment);
 		} catch (e) {
-			Logger.appendLine(`Open diff view failed: ${formatError(e)}`, PullRequestOverviewPanel.ID);
+			Logger.error(`Open diff view failed: ${formatError(e)}`, PullRequestOverviewPanel.ID);
 		}
 	}
 
@@ -883,6 +886,18 @@ export class PullRequestOverviewPanel extends IssueOverviewPanel<PullRequestMode
 				this._throwError(message, `${formatError(e)}`);
 			},
 		);
+	}
+
+	private reRequestReview(message: IRequestMessage<string>): void {
+		this._item.requestReview([message.args]).then(() => {
+			const reviewer = this._existingReviewers.find(reviewer => reviewer.reviewer.login === message.args);
+			if (reviewer) {
+				reviewer.state = 'REQUESTED';
+			}
+			this._replyMessage(message, {
+				reviewers: this._existingReviewers,
+			});
+		});
 	}
 
 	private async copyPrLink(): Promise<void> {

@@ -78,7 +78,7 @@ export class CredentialStore implements vscode.Disposable {
 			}
 		}
 
-		if (getAuthSessionOptions.createIfNone === undefined) {
+		if (getAuthSessionOptions.createIfNone === undefined && getAuthSessionOptions.forceNewSession === undefined) {
 			getAuthSessionOptions.createIfNone = false;
 		}
 
@@ -207,14 +207,13 @@ export class CredentialStore implements vscode.Disposable {
 		let retry: boolean = true;
 		let octokit: GitHub | undefined = undefined;
 		const sessionOptions: vscode.AuthenticationGetSessionOptions = { createIfNone: true };
-
 		while (retry) {
 			try {
 				await this.initialize(authProviderId, sessionOptions);
 			} catch (e) {
-				Logger.appendLine(`${errorPrefix}: ${e}`);
+				Logger.error(`${errorPrefix}: ${e}`);
 				if (e instanceof Error && e.stack) {
-					Logger.appendLine(e.stack);
+					Logger.error(e.stack);
 				}
 			}
 			octokit = this.getHub(authProviderId);
@@ -224,6 +223,7 @@ export class CredentialStore implements vscode.Disposable {
 				retry = (await vscode.window.showErrorMessage(errorPrefix, TRY_AGAIN, CANCEL)) === TRY_AGAIN;
 				if (retry) {
 					sessionOptions.forceNewSession = true;
+					sessionOptions.createIfNone = undefined;
 				}
 			}
 		}
@@ -266,12 +266,12 @@ export class CredentialStore implements vscode.Disposable {
 	}
 
 	private async getSession(authProviderId: AuthProvider, getAuthSessionOptions: vscode.AuthenticationGetSessionOptions): Promise<{ session: vscode.AuthenticationSession | undefined, isNew: boolean }> {
-		let session: vscode.AuthenticationSession | undefined = await vscode.authentication.getSession(authProviderId, SCOPES, { silent: true });
+		let session: vscode.AuthenticationSession | undefined = getAuthSessionOptions.forceNewSession ? undefined : await vscode.authentication.getSession(authProviderId, SCOPES, { silent: true });
 		if (session) {
 			return { session, isNew: false };
 		}
 
-		if (getAuthSessionOptions.createIfNone) {
+		if (getAuthSessionOptions.createIfNone && !getAuthSessionOptions.forceNewSession) {
 			const silent = getAuthSessionOptions.silent;
 			getAuthSessionOptions.createIfNone = false;
 			getAuthSessionOptions.silent = true;
@@ -281,6 +281,8 @@ export class CredentialStore implements vscode.Disposable {
 				getAuthSessionOptions.silent = silent;
 				session = await vscode.authentication.getSession(authProviderId, SCOPES, getAuthSessionOptions);
 			}
+		} else if (getAuthSessionOptions.forceNewSession) {
+			session = await vscode.authentication.getSession(authProviderId, SCOPES, getAuthSessionOptions);
 		} else {
 			session = await vscode.authentication.getSession(authProviderId, SCOPES_OLD, getAuthSessionOptions);
 		}
