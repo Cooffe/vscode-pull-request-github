@@ -13,7 +13,7 @@ import { commands } from '../common/executeCommands';
 import { GitChangeType, InMemFileChange, SlimFileChange } from '../common/file';
 import Logger from '../common/logger';
 import { parseRepositoryRemotes, Remote } from '../common/remote';
-import { FOCUSED_MODE, IGNORE_PR_BRANCHES, POST_CREATE, PR_SETTINGS_NAMESPACE, QUICK_DIFF, USE_REVIEW_MODE } from '../common/settingKeys';
+import { FOCUSED_MODE, IGNORE_PR_BRANCHES, POST_CREATE, PR_SETTINGS_NAMESPACE, QUICK_DIFF, QUICK_DIFF_EXP, USE_REVIEW_MODE } from '../common/settingKeys';
 import { ITelemetry } from '../common/telemetry';
 import { fromPRUri, fromReviewUri, KnownMediaExtensions, PRUriParams, Schemes, toReviewUri } from '../common/uri';
 import { formatError, groupBy, onceEvent } from '../common/utils';
@@ -73,7 +73,7 @@ export class ReviewManager {
 	public set switchingToReviewMode(newState: boolean) {
 		this._switchingToReviewMode = newState;
 		if (!newState) {
-			this.updateState();
+			this.updateState(true);
 		}
 	}
 
@@ -173,7 +173,7 @@ export class ReviewManager {
 	}
 
 	private registerQuickDiff() {
-		if (vscode.workspace.getConfiguration(SETTINGS_NAMESPACE).get<boolean>(QUICK_DIFF)) {
+		if (vscode.workspace.getConfiguration(SETTINGS_NAMESPACE).get<boolean>(QUICK_DIFF_EXP) || vscode.workspace.getConfiguration(SETTINGS_NAMESPACE).get<boolean>(QUICK_DIFF)) {
 			if (this._quickDiffProvider) {
 				this._quickDiffProvider.dispose();
 				this._quickDiffProvider = undefined;
@@ -374,6 +374,9 @@ export class ReviewManager {
 			return;
 		}
 		this._isShowingLastReviewChanges = pr.showChangesSinceReview;
+		if (previousPrNumber !== pr.number) {
+			this.clear(false);
+		}
 
 		const useReviewConfiguration = vscode.workspace.getConfiguration(PR_SETTINGS_NAMESPACE)
 			.get<{ merged: boolean, closed: boolean }>(USE_REVIEW_MODE, { merged: true, closed: false });
@@ -791,7 +794,6 @@ export class ReviewManager {
 				this.setStatusForPr(this._folderRepoManager.activePullRequest);
 			} else {
 				this.statusBarItem.hide();
-				this.switchingToReviewMode = false;
 			}
 			return;
 		}
@@ -1041,12 +1043,12 @@ export class ReviewManager {
 	}
 
 	private async clear(quitReviewMode: boolean) {
-		const activePullRequest = this._folderRepoManager.activePullRequest;
-		if (activePullRequest) {
-			this._activePrViewCoordinator.removePullRequest(activePullRequest);
-		}
-
 		if (quitReviewMode) {
+			const activePullRequest = this._folderRepoManager.activePullRequest;
+			if (activePullRequest) {
+				this._activePrViewCoordinator.removePullRequest(activePullRequest);
+			}
+
 			if (this.changesInPrDataProvider) {
 				await this.changesInPrDataProvider.removePrFromView(this._folderRepoManager);
 			}
@@ -1059,19 +1061,19 @@ export class ReviewManager {
 			}
 
 			vscode.commands.executeCommand('pr.refreshList');
+			this._updateMessageShown = false;
+			this._reviewModel.clear();
+
+			this._localToDispose.forEach(disposable => disposable.dispose());
+			// Ensure file explorer decorations are removed. When switching to a different PR branch,
+			// comments are recalculated when getting the data and the change decoration fired then,
+			// so comments only needs to be emptied in this case.
+			activePullRequest?.clear();
+			this._validateStatusInProgress = undefined;
 		}
 
-		this._updateMessageShown = false;
-		this._reviewModel.clear();
 		this._reviewCommentController?.dispose();
 		this._reviewCommentController = undefined;
-		this._localToDispose.forEach(disposable => disposable.dispose());
-		this._reviewCommentController = undefined;
-		// Ensure file explorer decorations are removed. When switching to a different PR branch,
-		// comments are recalculated when getting the data and the change decoration fired then,
-		// so comments only needs to be emptied in this case.
-		activePullRequest?.clear();
-		this._validateStatusInProgress = undefined;
 	}
 
 	async provideTextDocumentContent(uri: vscode.Uri): Promise<string | undefined> {

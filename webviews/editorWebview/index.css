@@ -115,26 +115,6 @@ body .comment-container.review {
 	background-color: var(--vscode-editor-background);
 }
 
-.icon-button {
-	display: flex;
-	padding: 2px;
-	background: transparent;
-	border-radius: 4px;
-	line-height: 0;
-}
-
-.icon-button:hover,
-.section .icon-button:hover,
-.section .icon-button:focus {
-	background-color: var(--vscode-toolbar-hoverBackground);
-}
-
-.icon-button:focus,
-.section .icon-button:focus {
-	outline: 1px solid var(--vscode-focusBorder);
-	outline-offset: unset;
-}
-
 .review-comment-container {
 	width: 100%;
 	display: flex;
@@ -154,6 +134,9 @@ body .comment-container .review-comment-header {
 	border-bottom: 1px solid var(--vscode-editorHoverWidget-border);
 	border-top-left-radius: 3px;
 	border-top-right-radius: 3px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .description-header {
@@ -885,6 +868,11 @@ code {
 	white-space: nowrap;
 }
 
+.timestamp {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
 /** Theming */
 
 .comment-body pre code {
@@ -1170,6 +1158,8 @@ code {
 	border-bottom-width: 1px;
 	padding: 8px 16px;
 	border-bottom-color: var(--vscode-editorHoverWidget-border);
+	border-top-left-radius: 3px;
+	border-top-right-radius: 3px;
 }
 
 .comment-body .blob-num {
