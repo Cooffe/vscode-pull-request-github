@@ -297,29 +297,48 @@ export function registerCommands(
 		}),
 	);
 
+	async function openDiffView(fileChangeNode: GitFileChangeNode | InMemFileChangeNode | vscode.Uri | undefined) {
+		if (fileChangeNode && !(fileChangeNode instanceof vscode.Uri)) {
+			const folderManager = reposManager.getManagerForIssueModel(fileChangeNode.pullRequest);
+			if (!folderManager) {
+				return;
+			}
+			return fileChangeNode.openDiff(folderManager);
+		} else if (fileChangeNode || vscode.window.activeTextEditor) {
+			const editor = fileChangeNode ? vscode.window.visibleTextEditors.find(editor => editor.document.uri.toString() === fileChangeNode.toString())! : vscode.window.activeTextEditor!;
+			const visibleRanges = editor.visibleRanges;
+			const folderManager = reposManager.getManagerForFile(editor.document.uri);
+			if (!folderManager?.activePullRequest) {
+				return;
+			}
+			const reviewManager = ReviewManager.getReviewManagerForFolderManager(reviewManagers, folderManager);
+			if (!reviewManager) {
+				return;
+			}
+			const change = reviewManager.reviewModel.localFileChanges.find(change => change.resourceUri.with({ query: '' }).toString() === editor.document.uri.toString());
+			await change?.openDiff(folderManager);
+			const tabInput = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+			const diffEditor = (tabInput instanceof vscode.TabInputTextDiff && tabInput.modified.toString() === editor.document.uri.toString()) ? vscode.window.activeTextEditor : undefined;
+			if (diffEditor) {
+				diffEditor.revealRange(visibleRanges[0]);
+			}
+		}
+	}
+
 	context.subscriptions.push(
 		vscode.commands.registerCommand(
 			'pr.openDiffView',
 			(fileChangeNode: GitFileChangeNode | InMemFileChangeNode | undefined) => {
-				if (fileChangeNode) {
-					const folderManager = reposManager.getManagerForIssueModel(fileChangeNode.pullRequest);
-					if (!folderManager) {
-						return;
-					}
-					fileChangeNode.openDiff(folderManager);
-				} else if (vscode.window.activeTextEditor) {
-					const activeTextEditor = vscode.window.activeTextEditor;
-					const folderManager = reposManager.getManagerForFile(activeTextEditor.document.uri);
-					if (!folderManager?.activePullRequest) {
-						return;
-					}
-					const reviewManager = ReviewManager.getReviewManagerForFolderManager(reviewManagers, folderManager);
-					if (!reviewManager) {
-						return;
-					}
-					const change = reviewManager.reviewModel.localFileChanges.find(change => change.resourceUri.with({ query: '' }).toString() === activeTextEditor.document.uri.toString());
-					change?.openDiff(folderManager);
-				}
+				return openDiffView(fileChangeNode);
+			},
+		),
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand(
+			'pr.openDiffViewFromEditor',
+			(uri: vscode.Uri) => {
+				return openDiffView(uri);
 			},
 		),
 	);
@@ -464,6 +483,26 @@ export function registerCommands(
 					)?.switch(pullRequestModel);
 				},
 			);
+		}),
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('pr.pickOnVscodeDev', async (pr: PRNode | DescriptionNode | PullRequestModel) => {
+			if (pr === undefined) {
+				// This is unexpected, but has happened a few times.
+				Logger.error('Unexpectedly received undefined when picking a PR.');
+				return vscode.window.showErrorMessage(vscode.l10n.t('No pull request was selected to checkout, please try again.'));
+			}
+
+			let pullRequestModel: PullRequestModel;
+
+			if (pr instanceof PRNode || pr instanceof DescriptionNode) {
+				pullRequestModel = pr.pullRequestModel;
+			} else {
+				pullRequestModel = pr;
+			}
+
+			return vscode.env.openExternal(vscode.Uri.parse(vscodeDevPrLink(pullRequestModel)));
 		}),
 	);
 
