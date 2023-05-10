@@ -1480,8 +1480,9 @@ export class FolderRepositoryManager implements vscode.Disposable {
 			throw new Error(`No matching repository ${params.repo} found for ${params.owner}`);
 		}
 
+		let pullRequestModel: PullRequestModel | undefined;
 		try {
-			const pullRequestModel = await repo.createPullRequest(params);
+			pullRequestModel = await repo.createPullRequest(params);
 
 			const branchNameSeparatorIndex = params.head.indexOf(':');
 			const branchName = params.head.slice(branchNameSeparatorIndex + 1);
@@ -1543,6 +1544,11 @@ export class FolderRepositoryManager implements vscode.Disposable {
 				isDraft: (params.draft || '').toString(),
 			});
 
+			if (pullRequestModel) {
+				// We have created the pull request but something else failed (ex., modifying the git config)
+				// We shouldn't show an error as the pull request was successfully created
+				return pullRequestModel;
+			}
 			throw new Error(formatError(e));
 		}
 	}
@@ -2058,7 +2064,12 @@ export class FolderRepositoryManager implements vscode.Disposable {
 	): Promise<PullRequestModel | undefined> {
 		const githubRepo = await this.resolveItem(owner, repositoryName);
 		if (githubRepo) {
-			return githubRepo.getPullRequest(pullRequestNumber);
+			const pr = await githubRepo.getPullRequest(pullRequestNumber);
+			if (pr) {
+				if (await githubRepo.hasBranch(pr.base.name)) {
+					return pr;
+				}
+			}
 		}
 		return undefined;
 	}
