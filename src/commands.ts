@@ -13,7 +13,7 @@ import { IComment } from './common/comment';
 import Logger from './common/logger';
 import { FILE_LIST_LAYOUT, PR_SETTINGS_NAMESPACE } from './common/settingKeys';
 import { ITelemetry } from './common/telemetry';
-import { asImageDataURI, fromReviewUri, Schemes } from './common/uri';
+import { asImageDataURI, fromReviewUri, Schemes, toPRUri } from './common/uri';
 import { formatError } from './common/utils';
 import { EXTENSION_ID } from './constants';
 import { FolderRepositoryManager } from './github/folderRepositoryManager';
@@ -1240,6 +1240,42 @@ ${contents}
 	context.subscriptions.push(
 		vscode.commands.registerCommand('pr.addFileComment', async () => {
 			return vscode.commands.executeCommand('workbench.action.addComment', { fileComment: true });
+		}));
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('review.diffWithPrHead', async (fileChangeNode: GitFileChangeNode) => {
+			const fileName = fileChangeNode.fileName;
+			let parentURI = toPRUri(
+				fileChangeNode.resourceUri,
+				fileChangeNode.pullRequest,
+				fileChangeNode.pullRequest.base.sha,
+				fileChangeNode.pullRequest.head.sha,
+				fileChangeNode.fileName,
+				true,
+				fileChangeNode.status);
+			let headURI = toPRUri(
+				fileChangeNode.resourceUri,
+				fileChangeNode.pullRequest,
+				fileChangeNode.pullRequest.base.sha,
+				fileChangeNode.pullRequest.head.sha,
+				fileChangeNode.fileName,
+				false,
+				fileChangeNode.status);
+			return vscode.commands.executeCommand('vscode.diff', parentURI, headURI, `${fileName} (Pull Request Compare Base with Head)`);
+		}));
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('review.diffLocalWithPrHead', async (fileChangeNode: GitFileChangeNode) => {
+			const fileName = fileChangeNode.fileName;
+			let headURI = toPRUri(
+				fileChangeNode.resourceUri,
+				fileChangeNode.pullRequest,
+				fileChangeNode.pullRequest.base.sha,
+				fileChangeNode.pullRequest.head.sha,
+				fileChangeNode.fileName,
+				false,
+				fileChangeNode.status);
+			return vscode.commands.executeCommand('vscode.diff', headURI, fileChangeNode.resourceUri, `${fileName} (Pull Request Compare Head with Local)`);
 		}));
 
 	function goToNextPrevDiff(diffs: vscode.LineChange[], next: boolean) {
