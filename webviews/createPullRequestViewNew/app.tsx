@@ -222,10 +222,10 @@ export function main() {
 					<div className="actions">
 						<button disabled={isBusy} className="secondary" onClick={() => ctx.cancelCreate()}>
 							Cancel
-							</button>
+						</button>
 						<button disabled={isBusy || !isCreateable} onClick={() => create()}>
 							Create
-							</button>
+						</button>
 					</div>
 				</div>;
 			}}
