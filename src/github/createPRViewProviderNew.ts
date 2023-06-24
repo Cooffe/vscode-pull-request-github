@@ -4,8 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import { CreateParams, CreatePullRequest, RemoteInfo } from '../../common/views';
-import type { Branch } from '../api/api';
+import { ChooseBaseRemoteAndBranchResult, ChooseCompareRemoteAndBranchResult, ChooseRemoteAndBranchArgs, CreateParams, CreatePullRequest, RemoteInfo } from '../../common/views';
+import type { Branch, Ref } from '../api/api';
 import { GitHubServerType } from '../common/authentication';
 import { commands, contexts } from '../common/executeCommands';
 import Logger from '../common/logger';
@@ -365,58 +365,146 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 		return params;
 	}
 
-	private async changeRemote(
-		message: IRequestMessage<{ owner: string; repositoryName: string }>,
-		isBase: boolean,
-	): Promise<void> {
-		const { owner, repositoryName } = message.args;
 
-		let githubRepository = this._folderRepositoryManager.findRepo(
-			repo => owner === repo.remote.owner && repositoryName === repo.remote.repositoryName,
-		);
+	private async remotePicks(isBase: boolean): Promise<(vscode.QuickPickItem & { remote?: RemoteInfo })[]> {
+		const remotes = isBase ? await this._folderRepositoryManager.getGitHubRemotes() : this._folderRepositoryManager.gitHubRepositories.map(repo => repo.remote);
+		return remotes.map(remote => {
+			return {
+				label: `${remote.owner}/${remote.repositoryName}`,
+				remote: {
+					owner: remote.owner,
+					repositoryName: remote.repositoryName,
+				}
+			};
+		});
+	}
 
-		if (!githubRepository) {
-			githubRepository = await this._folderRepositoryManager.createGitHubRepositoryFromOwnerName(owner, repositoryName);
+	private async branchPicks(githubRepository: GitHubRepository, changeRepoMessage: string, isBase: boolean): Promise<(vscode.QuickPickItem & { remote?: RemoteInfo, branch?: string })[]> {
+		let branches: (string | Ref)[];
+		if (isBase) {
+			// For the base, we only want to show branches from GitHub.
+			branches = await githubRepository.listBranches(githubRepository.remote.owner, githubRepository.remote.repositoryName);
+		} else {
+			// For the compare, we only want to show local branches.
+			branches = (await this._folderRepositoryManager.repository.getBranches({ remote: false })).filter(branch => branch.name);
 		}
-		if (!githubRepository) {
-			throw new Error('No matching GitHub repository found.');
-		}
+		// TODO: @alexr00 - Add sorting so that the most likely to be used branch (ex main or release if base) is at the top of the list.
+		const branchPicks: (vscode.QuickPickItem & { remote?: RemoteInfo, branch?: string })[] = branches.map(branch => {
+			const branchName = typeof branch === 'string' ? branch : branch.name!;
+			const pick: (vscode.QuickPickItem & { remote: RemoteInfo, branch: string }) = {
+				iconPath: new vscode.ThemeIcon('git-branch'),
+				label: branchName,
+				remote: {
+					owner: githubRepository.remote.owner,
+					repositoryName: githubRepository.remote.repositoryName
+				},
+				branch: branchName
+			};
+			return pick;
+		});
+		branchPicks.unshift({
+			kind: vscode.QuickPickItemKind.Separator,
+			label: vscode.l10n.t('Branches')
+		});
+		branchPicks.unshift({
+			iconPath: new vscode.ThemeIcon('github-alt'),
+			label: changeRepoMessage
+		});
+		return branchPicks;
+	}
 
-		const [defaultBranch, newBranches, viewerPermission] = await Promise.all([githubRepository.getDefaultBranch(), githubRepository.listBranches(owner, repositoryName), githubRepository.getViewerPermission()]);
+	private async processRemoteAndBranchResult(githubRepository: GitHubRepository, result: { remote: RemoteInfo, branch: string }, isBase: boolean) {
+		const [defaultBranch, viewerPermission] = await Promise.all([githubRepository.getDefaultBranch(), githubRepository.getViewerPermission()]);
 
 		commands.setContext(contexts.CREATE_PR_PERMISSIONS, viewerPermission);
-
-		if (!isBase && this.defaultCompareBranch?.name && !newBranches.includes(this.defaultCompareBranch.name)) {
-			newBranches.push(this.defaultCompareBranch.name);
-			newBranches.sort();
-		}
-
-		let newBranch: string | undefined;
-		let mergeArgs: Partial<CreateParams> = {};
-
+		let chooseResult: ChooseBaseRemoteAndBranchResult | ChooseCompareRemoteAndBranchResult;
 		if (isBase) {
-			newBranch = defaultBranch;
-			this._baseBranch = defaultBranch;
-			this._baseRemote = { owner, repositoryName };
-			this._onDidChangeBaseRemote.fire({ owner, repositoryName });
-			this._onDidChangeBaseBranch.fire(defaultBranch);
-
-			const mergeConfiguration = await this.getMergeConfiguration(owner, repositoryName);
-			mergeArgs = {
+			const baseRemoteChanged = this._baseRemote !== result.remote;
+			const baseBranchChanged = baseRemoteChanged || this._baseBranch !== result.branch;
+			this._baseBranch = result.branch;
+			this._baseRemote = result.remote;
+			const compareBranch = await this._folderRepositoryManager.repository.getBranch(this._compareBranch);
+			const [mergeConfiguration, titleAndDescription] = await Promise.all([this.getMergeConfiguration(result.remote.owner, result.remote.repositoryName), this.getTitleAndDescription(compareBranch, this._baseBranch)]);
+			chooseResult = {
+				baseRemote: result.remote,
+				baseBranch: result.branch,
+				defaultBaseBranch: defaultBranch,
 				defaultMergeMethod: getDefaultMergeMethod(mergeConfiguration.mergeMethodsAvailability),
 				allowAutoMerge: mergeConfiguration.viewerCanAutoMerge,
 				mergeMethodsAvailability: mergeConfiguration.mergeMethodsAvailability,
-				autoMergeDefault: mergeConfiguration.viewerCanAutoMerge && (vscode.workspace.getConfiguration(PR_SETTINGS_NAMESPACE).get<boolean>(SET_AUTO_MERGE, false) === true)
+				autoMergeDefault: mergeConfiguration.viewerCanAutoMerge && (vscode.workspace.getConfiguration(PR_SETTINGS_NAMESPACE).get<boolean>(SET_AUTO_MERGE, false) === true),
+				defaultTitle: titleAndDescription.title,
+				defaultDescription: titleAndDescription.description
 			};
-		} else {
-			if (this.defaultCompareBranch?.name) {
-				newBranch = this.defaultCompareBranch?.name;
-				this._compareBranch = this.defaultCompareBranch?.name;
+			if (baseRemoteChanged) {
+				this._onDidChangeBaseRemote.fire(this._baseRemote);
 			}
-			this._onDidChangeCompareRemote.fire({ owner, repositoryName });
+			if (baseBranchChanged) {
+				this._onDidChangeBaseBranch.fire(this._baseBranch);
+			}
+		} else {
+			this._compareBranch = result.branch;
+			chooseResult = {
+				compareRemote: result.remote,
+				compareBranch: result.branch,
+				defaultCompareBranch: defaultBranch
+			};
+			this._onDidChangeCompareRemote.fire(result.remote);
+			this._onDidChangeCompareBranch.fire(this._compareBranch);
+		}
+		return chooseResult;
+	}
+
+	private async changeRemoteAndBranch(message: IRequestMessage<ChooseRemoteAndBranchArgs>, isBase: boolean): Promise<void> {
+		const quickPick = vscode.window.createQuickPick<(vscode.QuickPickItem & { remote?: RemoteInfo, branch?: string })>();
+		let githubRepository = this._folderRepositoryManager.findRepo(
+			repo => message.args.currentRemote?.owner === repo.remote.owner && message.args.currentRemote.repositoryName === repo.remote.repositoryName,
+		);
+
+		const chooseDifferentRemote = vscode.l10n.t('Choose a different repository...');
+		const remotePlaceholder = vscode.l10n.t('Choose a remote');
+		quickPick.placeholder = githubRepository ? vscode.l10n.t('Choose a branch from {0}', `${githubRepository.remote.owner}/${githubRepository.remote.repositoryName}`) : remotePlaceholder;
+		quickPick.show();
+		quickPick.busy = true;
+		quickPick.items = githubRepository ? await this.branchPicks(githubRepository, chooseDifferentRemote, isBase) : await this.remotePicks(isBase);
+		quickPick.busy = false;
+		const remoteAndBranch: Promise<{ remote: RemoteInfo, branch: string } | undefined> = new Promise((resolve) => {
+			quickPick.onDidAccept(async () => {
+				if (quickPick.selectedItems.length === 0) {
+					return;
+				}
+				const selectedPick = quickPick.selectedItems[0];
+				if (selectedPick.label === chooseDifferentRemote) {
+					quickPick.busy = true;
+					quickPick.items = await this.remotePicks(isBase);
+					quickPick.busy = false;
+				} else if ((selectedPick.branch === undefined) && selectedPick.remote) {
+					const selectedRemote = selectedPick as vscode.QuickPickItem & { remote: RemoteInfo };
+					quickPick.busy = true;
+					githubRepository = this._folderRepositoryManager.findRepo(repo => repo.remote.owner === selectedRemote.remote.owner && repo.remote.repositoryName === selectedRemote.remote.repositoryName)!;
+					quickPick.items = await this.branchPicks(githubRepository, chooseDifferentRemote, isBase);
+					quickPick.placeholder = vscode.l10n.t('Choose a branch from {0}', `${githubRepository.remote.owner}/${githubRepository.remote.repositoryName}`);
+					quickPick.busy = false;
+				} else if (selectedPick.branch && selectedPick.remote) {
+					const selectedBranch = selectedPick as vscode.QuickPickItem & { remote: RemoteInfo, branch: string };
+					resolve({ remote: selectedBranch.remote, branch: selectedBranch.branch });
+				}
+			});
+		});
+		const hidePromise = new Promise<void>((resolve) => quickPick.onDidHide(() => resolve()));
+		const result = await Promise.race([remoteAndBranch, hidePromise]);
+		if (!result || !githubRepository) {
+			quickPick.hide();
+			quickPick.dispose();
+			return;
 		}
 
-		return this._replyMessage(message, { branches: newBranches, defaultBranch: newBranch, ...mergeArgs });
+		quickPick.busy = true;
+		const chooseResult = await this.processRemoteAndBranchResult(githubRepository, result, isBase);
+
+		quickPick.hide();
+		quickPick.dispose();
+		return this._replyMessage(message, chooseResult);
 	}
 
 	private async autoAssign(pr: PullRequestModel): Promise<void> {
@@ -630,12 +718,6 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 		return this.getTitleAndDescription(compareBranch, this._baseBranch);
 	}
 
-	private async changeBranchFromWebview(message: IRequestMessage<string | { name: string }>, isBase: boolean): Promise<void> {
-		const newBranch = (typeof message.args === 'string') ? message.args : message.args.name;
-		const titleAndDescription = await this.changeBranch(newBranch, isBase);
-		return this._replyMessage(message, { title: titleAndDescription.title, description: titleAndDescription.description });
-	}
-
 	private async cancel(message: IRequestMessage<CreatePullRequest>) {
 		vscode.commands.executeCommand('setContext', 'github:createPullRequest', false);
 		this._onDone.fire(undefined);
@@ -657,17 +739,11 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 			case 'pr.create':
 				return this.create(message);
 
-			case 'pr.changeBaseRemote':
-				return this.changeRemote(message, true);
+			case 'pr.changeBaseRemoteAndBranch':
+				return this.changeRemoteAndBranch(message, true);
 
-			case 'pr.changeBaseBranch':
-				return this.changeBranchFromWebview(message, true);
-
-			case 'pr.changeCompareRemote':
-				return this.changeRemote(message, false);
-
-			case 'pr.changeCompareBranch':
-				return this.changeBranchFromWebview(message, false);
+			case 'pr.changeCompareRemoteAndBranch':
+				return this.changeRemoteAndBranch(message, false);
 
 			case 'pr.removeLabel':
 				return this.removeLabel(message);
