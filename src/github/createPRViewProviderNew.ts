@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import { ChooseBaseRemoteAndBranchResult, ChooseCompareRemoteAndBranchResult, ChooseRemoteAndBranchArgs, CreateParams, CreatePullRequest, RemoteInfo } from '../../common/views';
+import { ChooseBaseRemoteAndBranchResult, ChooseCompareRemoteAndBranchResult, ChooseRemoteAndBranchArgs, CreateParamsNew, CreatePullRequest, RemoteInfo } from '../../common/views';
 import type { Branch, Ref } from '../api/api';
 import { GitHubServerType } from '../common/authentication';
 import { commands, contexts } from '../common/executeCommands';
@@ -29,6 +29,7 @@ import {
 } from './folderRepositoryManager';
 import { GitHubRepository } from './githubRepository';
 import { ILabel, MergeMethod, RepoAccessAndMergeMethods } from './interface';
+import { PullRequestGitHelper } from './pullRequestGitHelper';
 import { PullRequestModel } from './pullRequestModel';
 import { getDefaultMergeMethod } from './pullRequestOverview';
 import { ISSUE_EXPRESSION, parseIssueExpressionOutput, variableSubstitution } from './utils';
@@ -101,7 +102,7 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 		if (branchChanged || commitChanged) {
 			this._defaultCompareBranch = compareBranch!;
 			this.changeBranch(compareBranch!.name!, false).then(titleAndDescription => {
-				const params: Partial<CreateParams> = {
+				const params: Partial<CreateParamsNew> = {
 					defaultTitle: titleAndDescription.title,
 					defaultDescription: titleAndDescription.description,
 					compareBranch: compareBranch?.name,
@@ -248,58 +249,20 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 			// First clear all state ASAP
 			this._postMessage({ command: 'reset' });
 		}
-		// Do the fast initialization first, then update with the slower initialization.
-		const params = await this.initializeParamsFast(reset);
-		this.initializeParamsSlow(params);
+		await this.doInitializeParams(reset);
 	}
 
-	private async initializeParamsSlow(params: CreateParams): Promise<void> {
+	private async doInitializeParams(reset: boolean = false): Promise<CreateParamsNew> {
 		if (!this.defaultCompareBranch) {
 			throw new DetachedHeadError(this._folderRepositoryManager.repository);
 		}
-		if (!params.defaultBaseRemote || !params.defaultCompareRemote) {
-			throw new Error('Create Pull Request view unable to initialize without default remotes.');
-		}
-		const defaultOrigin = await this._folderRepositoryManager.getOrigin(this.defaultCompareBranch);
-		const viewerPermission = await defaultOrigin.getViewerPermission();
-		commands.setContext(contexts.CREATE_PR_PERMISSIONS, viewerPermission);
 
-		const branchesForRemote = await defaultOrigin.listBranches(this._pullRequestDefaults.owner, this._pullRequestDefaults.repo);
-		// Ensure default into branch is in the remotes list
-		if (!branchesForRemote.includes(this._pullRequestDefaults.base)) {
-			branchesForRemote.push(this._pullRequestDefaults.base);
-			branchesForRemote.sort();
-		}
-
-		let branchesForCompare = branchesForRemote;
-		if (params.defaultCompareRemote.owner !== params.defaultBaseRemote.owner) {
-			branchesForCompare = await defaultOrigin.listBranches(
-				params.defaultCompareRemote.owner,
-				params.defaultCompareRemote.repositoryName,
-			);
-		}
-
-		// Ensure default from branch is in the remotes list
-		if (this.defaultCompareBranch.name && !branchesForCompare.includes(this.defaultCompareBranch.name)) {
-			branchesForCompare.push(this.defaultCompareBranch.name);
-			branchesForCompare.sort();
-		}
-		params.branchesForRemote = branchesForRemote;
-		params.branchesForCompare = branchesForCompare;
-		this._postMessage({
-			command: 'pr.initialize',
-			params,
-		});
-	}
-
-	private async initializeParamsFast(reset: boolean = false): Promise<CreateParams> {
-		if (!this.defaultCompareBranch) {
-			throw new DetachedHeadError(this._folderRepositoryManager.repository);
-		}
+		const defaultCompareBranch = this.defaultCompareBranch.name ?? '';
+		const detectedBaseMetadata = await PullRequestGitHelper.getMatchingBaseBranchMetadataForBranch(this._folderRepositoryManager.repository, defaultCompareBranch);
 
 		const defaultBaseRemote: RemoteInfo = {
-			owner: this._pullRequestDefaults.owner,
-			repositoryName: this._pullRequestDefaults.repo,
+			owner: detectedBaseMetadata?.owner ?? this._pullRequestDefaults.owner,
+			repositoryName: detectedBaseMetadata?.repositoryName ?? this._pullRequestDefaults.repo,
 		};
 
 		const defaultOrigin = await this._folderRepositoryManager.getOrigin(this.defaultCompareBranch);
@@ -308,38 +271,20 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 			repositoryName: defaultOrigin.remote.repositoryName,
 		};
 
-		const defaultBaseBranch = this._pullRequestDefaults.base;
-		const [configuredGitHubRemotes, allGitHubRemotes, defaultTitleAndDescription, mergeConfiguration] = await Promise.all([
-			this._folderRepositoryManager.getGitHubRemotes(),
-			this._folderRepositoryManager.getAllGitHubRemotes(),
+		const defaultBaseBranch = detectedBaseMetadata?.branch ?? this._pullRequestDefaults.base;
+		const [defaultTitleAndDescription, mergeConfiguration, viewerPermission] = await Promise.all([
 			this.getTitleAndDescription(this.defaultCompareBranch, defaultBaseBranch),
-			this.getMergeConfiguration(defaultBaseRemote.owner, defaultBaseRemote.repositoryName)
+			this.getMergeConfiguration(defaultBaseRemote.owner, defaultBaseRemote.repositoryName),
+			await defaultOrigin.getViewerPermission()
 		]);
 
-		const configuredRemotes: RemoteInfo[] = configuredGitHubRemotes.map(remote => {
-			return {
-				owner: remote.owner,
-				repositoryName: remote.repositoryName,
-			};
-		});
+		commands.setContext(contexts.CREATE_PR_PERMISSIONS, viewerPermission);
 
-		const allRemotes: RemoteInfo[] = allGitHubRemotes.map(remote => {
-			return {
-				owner: remote.owner,
-				repositoryName: remote.repositoryName,
-			};
-		});
-		const defaultCompareBranch = this.defaultCompareBranch.name ?? '';
-
-		const params: CreateParams = {
-			availableBaseRemotes: configuredRemotes,
-			availableCompareRemotes: allRemotes,
+		const params: CreateParamsNew = {
 			defaultBaseRemote,
 			defaultBaseBranch,
 			defaultCompareRemote,
 			defaultCompareBranch,
-			branchesForRemote: [defaultBaseBranch], // We'll populate the branches in the slow phase as they are less likely to be needed.
-			branchesForCompare: [defaultCompareBranch],
 			defaultTitle: defaultTitleAndDescription.title,
 			defaultDescription: defaultTitleAndDescription.description,
 			defaultMergeMethod: getDefaultMergeMethod(mergeConfiguration.mergeMethodsAvailability),
@@ -370,6 +315,7 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 		const remotes = isBase ? await this._folderRepositoryManager.getGitHubRemotes() : this._folderRepositoryManager.gitHubRepositories.map(repo => repo.remote);
 		return remotes.map(remote => {
 			return {
+				iconPath: new vscode.ThemeIcon('repo'),
 				label: `${remote.owner}/${remote.repositoryName}`,
 				remote: {
 					owner: remote.owner,
@@ -404,10 +350,10 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 		});
 		branchPicks.unshift({
 			kind: vscode.QuickPickItemKind.Separator,
-			label: vscode.l10n.t('Branches')
+			label: `${githubRepository.remote.owner}/${githubRepository.remote.repositoryName}`
 		});
 		branchPicks.unshift({
-			iconPath: new vscode.ThemeIcon('github-alt'),
+			iconPath: new vscode.ThemeIcon('repo'),
 			label: changeRepoMessage
 		});
 		return branchPicks;
@@ -437,9 +383,17 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 				defaultDescription: titleAndDescription.description
 			};
 			if (baseRemoteChanged) {
+				/* __GDPR__
+				"pr.create.changedBaseRemote" : {}
+				*/
+				this._folderRepositoryManager.telemetry.sendTelemetryEvent('pr.create.changedBaseRemote');
 				this._onDidChangeBaseRemote.fire(this._baseRemote);
 			}
 			if (baseBranchChanged) {
+				/* __GDPR__
+				"pr.create.changedBaseBranch" : {}
+				*/
+				this._folderRepositoryManager.telemetry.sendTelemetryEvent('pr.create.changedBaseBranch');
 				this._onDidChangeBaseBranch.fire(this._baseBranch);
 			}
 		} else {
@@ -449,6 +403,10 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 				compareBranch: result.branch,
 				defaultCompareBranch: defaultBranch
 			};
+			/* __GDPR__
+			"pr.create.changedCompare" : {}
+			*/
+			this._folderRepositoryManager.telemetry.sendTelemetryEvent('pr.create.changedCompare');
 			this._onDidChangeCompareRemote.fire(result.remote);
 			this._onDidChangeCompareBranch.fire(this._compareBranch);
 		}
@@ -461,9 +419,12 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 			repo => message.args.currentRemote?.owner === repo.remote.owner && message.args.currentRemote.repositoryName === repo.remote.repositoryName,
 		);
 
-		const chooseDifferentRemote = vscode.l10n.t('Choose a different repository...');
+		const chooseDifferentRemote = vscode.l10n.t('Change Repository...');
 		const remotePlaceholder = vscode.l10n.t('Choose a remote');
-		quickPick.placeholder = githubRepository ? vscode.l10n.t('Choose a branch from {0}', `${githubRepository.remote.owner}/${githubRepository.remote.repositoryName}`) : remotePlaceholder;
+		const branchPlaceholder = isBase ? vscode.l10n.t('Choose a base branch') : vscode.l10n.t('Choose a branch to merge');
+		const repositoryPlaceholder = isBase ? vscode.l10n.t('Choose a base repository') : vscode.l10n.t('Choose a repository to merge from');
+
+		quickPick.placeholder = githubRepository ? branchPlaceholder : remotePlaceholder;
 		quickPick.show();
 		quickPick.busy = true;
 		quickPick.items = githubRepository ? await this.branchPicks(githubRepository, chooseDifferentRemote, isBase) : await this.remotePicks(isBase);
@@ -478,12 +439,13 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 					quickPick.busy = true;
 					quickPick.items = await this.remotePicks(isBase);
 					quickPick.busy = false;
+					quickPick.placeholder = githubRepository ? repositoryPlaceholder : remotePlaceholder;
 				} else if ((selectedPick.branch === undefined) && selectedPick.remote) {
 					const selectedRemote = selectedPick as vscode.QuickPickItem & { remote: RemoteInfo };
 					quickPick.busy = true;
 					githubRepository = this._folderRepositoryManager.findRepo(repo => repo.remote.owner === selectedRemote.remote.owner && repo.remote.repositoryName === selectedRemote.remote.repositoryName)!;
 					quickPick.items = await this.branchPicks(githubRepository, chooseDifferentRemote, isBase);
-					quickPick.placeholder = vscode.l10n.t('Choose a branch from {0}', `${githubRepository.remote.owner}/${githubRepository.remote.repositoryName}`);
+					quickPick.placeholder = branchPlaceholder;
 					quickPick.busy = false;
 				} else if (selectedPick.branch && selectedPick.remote) {
 					const selectedBranch = selectedPick as vscode.QuickPickItem & { remote: RemoteInfo, branch: string };
@@ -556,7 +518,7 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 
 		const labelsToAdd = await vscode.window.showQuickPick(
 			getLabelOptions(this._folderRepositoryManager, this.labels, this._baseRemote),
-			{ canPickMany: true },
+			{ canPickMany: true, placeHolder: 'Apply labels' },
 		);
 
 		if (labelsToAdd) {
