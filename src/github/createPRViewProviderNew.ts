@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import { ChooseBaseRemoteAndBranchResult, ChooseCompareRemoteAndBranchResult, ChooseRemoteAndBranchArgs, CreateParamsNew, CreatePullRequest, RemoteInfo } from '../../common/views';
+import { ChooseBaseRemoteAndBranchResult, ChooseCompareRemoteAndBranchResult, ChooseRemoteAndBranchArgs, CreateParamsNew, CreatePullRequestNew, RemoteInfo } from '../../common/views';
 import type { Branch, Ref } from '../api/api';
 import { GitHubServerType } from '../common/authentication';
 import { commands, contexts } from '../common/executeCommands';
@@ -19,7 +19,9 @@ import {
 	PUSH_BRANCH,
 	SET_AUTO_MERGE,
 } from '../common/settingKeys';
+import { asPromise, compareIgnoreCase, formatError } from '../common/utils';
 import { getNonce, IRequestMessage, WebviewViewBase } from '../common/webview';
+import { PREVIOUS_CREATE_METHOD } from '../extensionState';
 import {
 	byRemoteName,
 	DetachedHeadError,
@@ -28,15 +30,16 @@ import {
 	titleAndBodyFrom,
 } from './folderRepositoryManager';
 import { GitHubRepository } from './githubRepository';
-import { ILabel, MergeMethod, RepoAccessAndMergeMethods } from './interface';
+import { IAccount, ILabel, IMilestone, isTeam, ITeam, MergeMethod, RepoAccessAndMergeMethods } from './interface';
 import { PullRequestGitHelper } from './pullRequestGitHelper';
 import { PullRequestModel } from './pullRequestModel';
 import { getDefaultMergeMethod } from './pullRequestOverview';
+import { getAssigneesQuickPickItems, getMilestoneFromQuickPick, reviewersQuickPick } from './quickPicks';
 import { ISSUE_EXPRESSION, parseIssueExpressionOutput, variableSubstitution } from './utils';
 
 const ISSUE_CLOSING_KEYWORDS = new RegExp('closes|closed|close|fixes|fixed|fix|resolves|resolved|resolve\s$', 'i'); // https://docs.github.com/en/issues/tracking-your-work-with-issues/linking-a-pull-request-to-an-issue#linking-a-pull-request-to-an-issue-using-a-keyword
 
-export class CreatePullRequestViewProviderNew extends WebviewViewBase implements vscode.WebviewViewProvider {
+export class CreatePullRequestViewProviderNew extends WebviewViewBase implements vscode.WebviewViewProvider, vscode.Disposable {
 	private static readonly ID = 'CreatePullRequestViewProvider';
 	public readonly viewType = 'github:createPullRequest';
 
@@ -83,10 +86,9 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 		if (this._firstLoad) {
 			this._firstLoad = false;
 			// Reset any stored state.
-			// TODO @RMacfarlane Clear stored state on extension deactivation instead.
-			this.initializeParams(true);
+			return this.initializeParams(true);
 		} else {
-			this.initializeParams();
+			return this.initializeParams();
 		}
 	}
 
@@ -96,10 +98,10 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 	}
 
 	set defaultCompareBranch(compareBranch: Branch | undefined) {
-		const branchChanged = compareBranch && (compareBranch.name !== this._defaultCompareBranch.name ||
-			compareBranch.upstream?.remote !== this._defaultCompareBranch.upstream?.remote);
+		const branchChanged = compareBranch && (compareBranch.name !== this._defaultCompareBranch.name);
+		const branchRemoteChanged = compareBranch && (compareBranch.upstream?.remote !== this._defaultCompareBranch.upstream?.remote);
 		const commitChanged = compareBranch && (compareBranch.commit !== this._defaultCompareBranch.commit);
-		if (branchChanged || commitChanged) {
+		if (branchChanged || branchRemoteChanged || commitChanged) {
 			this._defaultCompareBranch = compareBranch!;
 			this.changeBranch(compareBranch!.name!, false).then(titleAndDescription => {
 				const params: Partial<CreateParamsNew> = {
@@ -108,10 +110,12 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 					compareBranch: compareBranch?.name,
 					defaultCompareBranch: compareBranch?.name
 				};
-				return this._postMessage({
-					command: 'reset',
-					params,
-				});
+				if (!branchRemoteChanged) {
+					return this._postMessage({
+						command: 'reset',
+						params,
+					});
+				}
 			});
 
 			if (branchChanged) {
@@ -258,7 +262,9 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 		}
 
 		const defaultCompareBranch = this.defaultCompareBranch.name ?? '';
-		const detectedBaseMetadata = await PullRequestGitHelper.getMatchingBaseBranchMetadataForBranch(this._folderRepositoryManager.repository, defaultCompareBranch);
+		const [detectedBaseMetadata, remotes] = await Promise.all([
+			PullRequestGitHelper.getMatchingBaseBranchMetadataForBranch(this._folderRepositoryManager.repository, defaultCompareBranch),
+			this._folderRepositoryManager.getGitHubRemotes()]);
 
 		const defaultBaseRemote: RemoteInfo = {
 			owner: detectedBaseMetadata?.owner ?? this._pullRequestDefaults.owner,
@@ -278,6 +284,15 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 			await defaultOrigin.getViewerPermission()
 		]);
 
+		const lastCreateMethod: { autoMerge: boolean, mergeMethod: MergeMethod | undefined, isDraft: boolean } | undefined = this._folderRepositoryManager.context.workspaceState.get<{ autoMerge: boolean, mergeMethod: MergeMethod, isDraft } | undefined>(PREVIOUS_CREATE_METHOD, undefined);
+		const repoMergeMethod = getDefaultMergeMethod(mergeConfiguration.mergeMethodsAvailability);
+		const defaultMergeMethod = lastCreateMethod?.mergeMethod ?? repoMergeMethod;
+
+		const draftSetting = vscode.workspace.getConfiguration(PR_SETTINGS_NAMESPACE).get(CREATE_DRAFT, false);
+		const isDraftDefault = lastCreateMethod?.isDraft ?? draftSetting;
+
+		const autoMergeSetting = (vscode.workspace.getConfiguration(PR_SETTINGS_NAMESPACE).get<boolean>(SET_AUTO_MERGE, false) === true);
+		const autoMergeDefault = mergeConfiguration.viewerCanAutoMerge && (lastCreateMethod?.autoMerge ?? autoMergeSetting);
 		commands.setContext(contexts.CREATE_PR_PERMISSIONS, viewerPermission);
 
 		const params: CreateParamsNew = {
@@ -287,13 +302,14 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 			defaultCompareBranch,
 			defaultTitle: defaultTitleAndDescription.title,
 			defaultDescription: defaultTitleAndDescription.description,
-			defaultMergeMethod: getDefaultMergeMethod(mergeConfiguration.mergeMethodsAvailability),
+			defaultMergeMethod,
+			remoteCount: remotes.length,
 			allowAutoMerge: mergeConfiguration.viewerCanAutoMerge,
 			mergeMethodsAvailability: mergeConfiguration.mergeMethodsAvailability,
-			autoMergeDefault: mergeConfiguration.viewerCanAutoMerge && (vscode.workspace.getConfiguration(PR_SETTINGS_NAMESPACE).get<boolean>(SET_AUTO_MERGE, false) === true),
+			autoMergeDefault,
 			createError: '',
 			labels: this.labels,
-			isDraftDefault: vscode.workspace.getConfiguration(PR_SETTINGS_NAMESPACE).get(CREATE_DRAFT, false),
+			isDraftDefault,
 			isDarkTheme: vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
 		};
 
@@ -497,6 +513,102 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 		}
 	}
 
+	private async setAssignees(pr: PullRequestModel, assignees: IAccount[]): Promise<void> {
+		if (assignees.length) {
+			await pr.addAssignees(assignees.map(assignee => assignee.login));
+		} else {
+			await this.autoAssign(pr);
+		}
+	}
+
+	private async setReviewers(pr: PullRequestModel, reviewers: (IAccount | ITeam)[]): Promise<void> {
+		if (reviewers.length) {
+			const users: string[] = [];
+			const teams: string[] = [];
+			for (const reviewer of reviewers) {
+				if (isTeam(reviewer)) {
+					teams.push(reviewer.id);
+				} else {
+					users.push(reviewer.id);
+				}
+			}
+			await pr.requestReview(users, teams);
+		}
+	}
+
+	private setMilestone(pr: PullRequestModel, milestone: IMilestone | undefined): void {
+		if (milestone) {
+			pr.updateMilestone(milestone.id);
+		}
+	}
+
+	private async getRemote(): Promise<GitHubRemote> {
+		return (await this._folderRepositoryManager.getGitHubRemotes()).find(remote => compareIgnoreCase(remote.owner, this._baseRemote.owner) === 0 && compareIgnoreCase(remote.repositoryName, this._baseRemote.repositoryName) === 0)!;
+	}
+
+	private milestone: IMilestone | undefined;
+	public async addMilestone(): Promise<void> {
+		const remote = await this.getRemote();
+		const repo = this._folderRepositoryManager.gitHubRepositories.find(repo => repo.remote.remoteName === remote.remoteName)!;
+
+		return getMilestoneFromQuickPick(this._folderRepositoryManager, repo, (milestone) => {
+			this.milestone = milestone;
+			return this._postMessage({
+				command: 'set-milestone',
+				params: { milestone: this.milestone }
+			});
+		});
+	}
+
+	private reviewers: (IAccount | ITeam)[] = [];
+	public async addReviewers(): Promise<void> {
+		let quickPick: vscode.QuickPick<vscode.QuickPickItem & {
+			reviewer?: IAccount | ITeam | undefined;
+		}> | undefined;
+		const remote = await this.getRemote();
+		try {
+			const repo = this._folderRepositoryManager.gitHubRepositories.find(repo => repo.remote.remoteName === remote.remoteName)!;
+			const [metadata, author, teamsCount] = await Promise.all([repo?.getMetadata(), this._folderRepositoryManager.getCurrentUser(), this._folderRepositoryManager.getOrgTeamsCount(repo)]);
+			quickPick = await reviewersQuickPick(this._folderRepositoryManager, remote.remoteName, !!metadata?.organization, teamsCount, author, this.reviewers.map(reviewer => { return { reviewer, state: 'REQUESTED' }; }), []);
+			quickPick.busy = false;
+			const acceptPromise = asPromise<void>(quickPick.onDidAccept).then(() => {
+				return quickPick!.selectedItems.filter(item => item.reviewer) as (vscode.QuickPickItem & { reviewer: IAccount | ITeam })[] | undefined;
+			});
+			const hidePromise = asPromise<void>(quickPick.onDidHide);
+			const allReviewers = await Promise.race<(vscode.QuickPickItem & { reviewer: IAccount | ITeam })[] | void>([acceptPromise, hidePromise]);
+			quickPick.busy = true;
+
+			if (allReviewers) {
+				this.reviewers = allReviewers.map(item => item.reviewer);
+				this._postMessage({
+					command: 'set-reviewers',
+					params: { reviewers: this.reviewers }
+				});
+			}
+		} catch (e) {
+			Logger.error(formatError(e));
+			vscode.window.showErrorMessage(formatError(e));
+		} finally {
+			quickPick?.hide();
+			quickPick?.dispose();
+		}
+	}
+
+	private assignees: IAccount[] = [];
+	public async addAssignees(): Promise<void> {
+		const remote = await this.getRemote();
+		const assigneesToAdd = await vscode.window.showQuickPick(getAssigneesQuickPickItems(this._folderRepositoryManager, remote.remoteName, this.assignees),
+			{ canPickMany: true, placeHolder: vscode.l10n.t('Add Assignees') });
+		if (assigneesToAdd) {
+			const addedAssignees = assigneesToAdd.map(assignee => assignee.assignee).filter<IAccount>((assignee): assignee is IAccount => !!assignee);
+			this.assignees = addedAssignees;
+			this._postMessage({
+				command: 'set-assignees',
+				params: { assignees: this.assignees }
+			});
+		}
+	}
+
 	private labels: ILabel[] = [];
 	public async addLabels(): Promise<void> {
 		let newLabels: ILabel[] = [];
@@ -518,7 +630,7 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 
 		const labelsToAdd = await vscode.window.showQuickPick(
 			getLabelOptions(this._folderRepositoryManager, this.labels, this._baseRemote),
-			{ canPickMany: true, placeHolder: 'Apply labels' },
+			{ canPickMany: true, placeHolder: vscode.l10n.t('Apply labels') },
 		);
 
 		if (labelsToAdd) {
@@ -568,15 +680,21 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 		}
 	}
 
-	private async create(message: IRequestMessage<CreatePullRequest>): Promise<void> {
+	private async create(message: IRequestMessage<CreatePullRequestNew>): Promise<void> {
 		Logger.debug(`Creating pull request with args ${JSON.stringify(message.args)}`, CreatePullRequestViewProviderNew.ID);
 
-		function postCreate(createdPR: PullRequestModel) {
+		// Save create method
+		const createMethod: { autoMerge: boolean, mergeMethod: MergeMethod | undefined, isDraft: boolean } = { autoMerge: message.args.autoMerge, mergeMethod: message.args.autoMergeMethod, isDraft: message.args.draft };
+		this._folderRepositoryManager.context.workspaceState.update(PREVIOUS_CREATE_METHOD, createMethod);
+
+		const postCreate = (createdPR: PullRequestModel) => {
 			return Promise.all([
 				this.setLabels(createdPR, message.args.labels),
 				this.enableAutoMerge(createdPR, message.args.autoMerge, message.args.autoMergeMethod),
-				this.autoAssign(createdPR)]);
-		}
+				this.setAssignees(createdPR, message.args.assignees),
+				this.setReviewers(createdPR, message.args.reviewers),
+				this.setMilestone(createdPR, message.args.milestone)]);
+		};
 
 		vscode.window.withProgress({ location: { viewId: 'github:createPullRequest' } }, () => {
 			return vscode.window.withProgress({ location: vscode.ProgressLocation.Notification }, async progress => {
@@ -660,11 +778,15 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 						vscode.window.showErrorMessage(vscode.l10n.t('There was an error creating the pull request: {0}', e.message));
 					}
 				} finally {
+					let completeMessage: string;
 					if (createdPR) {
 						await this._replyMessage(message, {});
 						this._onDone.fire(createdPR);
+						completeMessage = vscode.l10n.t('Pull request created');
+					} else {
+						completeMessage = vscode.l10n.t('Unable to create pull request');
 					}
-					progress.report({ message: vscode.l10n.t('Pull request created'), increment: 100 - totalIncrement });
+					progress.report({ message: completeMessage, increment: 100 - totalIncrement });
 				}
 			});
 		});
@@ -689,7 +811,7 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 		return this.getTitleAndDescription(compareBranch, this._baseBranch);
 	}
 
-	private async cancel(message: IRequestMessage<CreatePullRequest>) {
+	private async cancel(message: IRequestMessage<CreatePullRequestNew>) {
 		vscode.commands.executeCommand('setContext', 'github:createPullRequest', false);
 		this._onDone.fire(undefined);
 		// Re-fetch the automerge info so that it's updated for next time.
@@ -716,6 +838,9 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 			case 'pr.changeCompareRemoteAndBranch':
 				return this.changeRemoteAndBranch(message, false);
 
+			case 'pr.changeLabels':
+				return this.addLabels();
+
 			case 'pr.removeLabel':
 				return this.removeLabel(message);
 
@@ -723,6 +848,11 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 				// Log error
 				vscode.window.showErrorMessage('Unsupported webview message');
 		}
+	}
+
+	dispose() {
+		super.dispose();
+		this._postMessage({ command: 'reset' });
 	}
 
 	private _getHtmlForWebview() {

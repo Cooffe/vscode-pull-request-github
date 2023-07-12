@@ -7,24 +7,23 @@ import React, { useCallback, useContext, useEffect, useRef, useState } from 'rea
 import { render } from 'react-dom';
 import { CreateParamsNew, RemoteInfo } from '../../common/views';
 import { compareIgnoreCase } from '../../src/common/utils';
+import { isTeam, MergeMethod } from '../../src/github/interface';
 import PullRequestContextNew from '../common/createContextNew';
 import { ErrorBoundary } from '../common/errorBoundary';
-import { Label } from '../common/label';
-import { AutoMerge } from '../components/automergeSelect';
-import { closeIcon, gearIcon, prBaseIcon, prMergeIcon, chevronDownIcon } from '../components/icon';
-import { assigneeIcon, reviewerIcon, labelIcon, milestoneIcon } from '../components/icon';
+import { LabelCreate } from '../common/label';
+import { assigneeIcon, chevronDownIcon, labelIcon, milestoneIcon, prBaseIcon, prMergeIcon, reviewerIcon } from '../components/icon';
 
+type CreateMethod = 'create-draft' | 'create' | 'create-automerge-squash' | 'create-automerge-rebase' | 'create-automerge-merge';
 
+export const ChooseRemoteAndBranch = ({ onClick, defaultRemote, defaultBranch, isBase, remoteCount = 0, disabled }:
+	{ onClick: (remote?: RemoteInfo, branch?: string) => Promise<void>, defaultRemote: RemoteInfo | undefined, defaultBranch: string | undefined, isBase: boolean, remoteCount: number | undefined, disabled: boolean }) => {
 
-
-
-export const ChooseRemoteAndBranch = ({ onClick, defaultRemote, defaultBranch }:
-	{ onClick: (remote?: RemoteInfo, branch?: string) => Promise<void>, defaultRemote: RemoteInfo | undefined, defaultBranch: string | undefined }) => {
-	const defaultsLabel = defaultRemote && defaultBranch ? `${defaultRemote.owner}/${defaultBranch}` : '-';
+	const defaultsLabel = (defaultRemote && defaultBranch) ? `${remoteCount > 1 ? `${defaultRemote.owner}/` : ''}${defaultBranch}` : '-';
+	const title = isBase ? 'Base branch: ' + defaultsLabel : 'Branch to merge: ' + defaultsLabel;
 
 	return <ErrorBoundary>
 		<div className='flex'>
-			<button title='Choose a repository and branch' className='secondary' onClick={() => {
+			<button title={disabled ? '' : title} aria-label={title} disabled={disabled} onClick={() => {
 				onClick(defaultRemote, defaultBranch);
 			}}>
 				{defaultsLabel}
@@ -33,15 +32,34 @@ export const ChooseRemoteAndBranch = ({ onClick, defaultRemote, defaultBranch }:
 	</ErrorBoundary>;
 };
 
-
 export function main() {
 	render(
 		<Root>
 			{(params: CreateParamsNew) => {
 				const ctx = useContext(PullRequestContextNew);
 				const [isBusy, setBusy] = useState(false);
+				function createMethodLabel(isDraft?: boolean, autoMerge?: boolean, autoMergeMethod?: MergeMethod): { value: CreateMethod, label: string } {
+					let value: CreateMethod;
+					let label: string;
+					if (autoMerge && autoMergeMethod) {
+						value = `create-automerge-${autoMergeMethod}` as CreateMethod;
+						label = `Create & Auto-Merge (${autoMergeMethod})`;
+					} else if (isDraft) {
+						value = 'create-draft';
+						label = 'Create Draft';
+					} else {
+						value = 'create';
+						label = 'Create';
+					}
 
-				const titleInput = useRef<HTMLInputElement>();
+					return {value, label};
+				}
+				function createMethodOption(isDraft?: boolean, autoMerge?: boolean, autoMergeMethod?: MergeMethod) {
+					const {value, label} = createMethodLabel(isDraft, autoMerge, autoMergeMethod);
+					return <option value={value}>{label}</option>;
+				}
+
+				const titleInput = useRef<HTMLInputElement>() as React.MutableRefObject<HTMLInputElement>;
 
 				function updateTitle(title: string): void {
 					if (params.validate) {
@@ -80,10 +98,37 @@ export function main() {
 					},
 					[create],
 				);
+				const createMethodSelect: React.MutableRefObject<HTMLSelectElement> = React.useRef<HTMLSelectElement>() as React.MutableRefObject<HTMLSelectElement>;
 
-				if (!ctx.initialized) {
-					return <div className="loading-indicator">Loading...</div>;
-				}
+				const onCreateButton = () => {
+					const selected = createMethodSelect.current?.value as CreateMethod;
+					let isDraft = false;
+					let autoMerge = false;
+					let autoMergeMethod: MergeMethod | undefined;
+					switch (selected) {
+						case 'create-draft':
+							isDraft = true;
+							autoMerge = false;
+							break;
+						case 'create-automerge-squash':
+							isDraft = false;
+							autoMerge = true;
+							autoMergeMethod = 'squash';
+							break;
+						case 'create-automerge-rebase':
+							isDraft = false;
+							autoMerge = true;
+							autoMergeMethod = 'rebase';
+							break;
+						case 'create-automerge-merge':
+							isDraft = false;
+							autoMerge = true;
+							autoMergeMethod = 'merge';
+							break;
+					}
+					ctx.updateState({ isDraft, autoMerge, autoMergeMethod });
+					return create();
+				};
 
 				return <div className='group-main'>
 					<div className='group-branches'>
@@ -93,7 +138,10 @@ export function main() {
 							</div>
 							<ChooseRemoteAndBranch onClick={ctx.changeBaseRemoteAndBranch}
 								defaultRemote={params.baseRemote}
-								defaultBranch={params.baseBranch} />
+								defaultBranch={params.baseBranch}
+								remoteCount={params.remoteCount}
+								isBase={true}
+								disabled={!ctx.initialized} />
 						</div>
 
 						<div className='input-label merge'>
@@ -101,25 +149,13 @@ export function main() {
 								<span title='Merge branch'>{prMergeIcon} Merge</span>
 							</div>
 							<ChooseRemoteAndBranch onClick={ctx.changeMergeRemoteAndBranch}
-									defaultRemote={params.compareRemote}
-									defaultBranch={params.compareBranch} />
+								defaultRemote={params.compareRemote}
+								defaultBranch={params.compareBranch}
+								remoteCount={params.remoteCount}
+								isBase={false}
+								disabled={!ctx.initialized} />
 						</div>
 					</div>
-
-					{params.labels && (params.labels.length > 0) ?
-						<div>
-							<label className='input-label'>Labels</label>
-							<div className='labels-list'>
-								{params.labels.map(label => <Label key={label.name} {...label} canDelete isDarkTheme={!!params.isDarkTheme}>
-									<button className="icon-button" onClick={() => {
-										ctx.postMessage({ command: 'pr.removeLabel', args: { label } });
-									}}>
-										{closeIcon}️
-									</button>
-								</Label>)}
-							</div>
-						</div>
-						: null}
 
 					<div className='group-title'>
 						<input
@@ -127,6 +163,7 @@ export function main() {
 							type='text'
 							ref={titleInput}
 							name='title'
+							value={params.pendingTitle ?? ''}
 							className={params.showTitleValidationError ? 'input-error' : ''}
 							aria-invalid={!!params.showTitleValidationError}
 							aria-describedby={params.showTitleValidationError ? 'title-error' : ''}
@@ -135,60 +172,59 @@ export function main() {
 							title='Required'
 							required
 							onChange={(e) => updateTitle(e.currentTarget.value)}
-							onKeyDown={onKeyDown}>
+							onKeyDown={onKeyDown}
+							disabled={!ctx.initialized}>
 						</input>
 						<div id='title-error' className={params.showTitleValidationError ? 'validation-error below-input-error' : 'hidden'}>A title is required</div>
 					</div>
 
 					<div className='group-additions'>
-						<div className='assignees'>
-							<span title='Assignees'>{assigneeIcon}</span>
-							<ul aria-label='Assignees' tabIndex={0}>
-								<li>deepak1556</li>
-								<li>hbons</li>
-								<li>alexr00</li>
-								<li>deepak1556</li>
-								<li>hbons</li>
-								<li>alexr00</li>
-								<li>deepak1556</li>
-								<li>hbons</li>
-								<li>alexr00</li>
-							</ul>
-						</div>
-						<div className='reviewers'>
-							<span title='Reviewers'>{reviewerIcon}</span>
-							<ul aria-label='Reviewers' tabIndex={0}>
-								<li>alexr00</li>
-								<li>deepak1556</li>
-								<li>hbons</li>
-								<li>alexr00</li>
-								<li>deepak1556</li>
-								<li>hbons</li>
-								<li>alexr00</li>
-								<li>hbons</li>
-							</ul>
-						</div>
-						<div className='labels'>
-							<span title='Labels'>{labelIcon}</span>
-							<ul aria-label='Labels' tabIndex={0}>
-							<li>ux</li>
-								<li>design</li>
-								<li>docs</li>
-								<li>macos</li>
-								<li>help-wanted</li>
-								<li>ux</li>
-								<li>design</li>
-								<li>docs</li>
-								<li>macos</li>
-								<li>help-wanted</li>
-							</ul>
-						</div>
-						<div className='milestone'>
-							<span title='Milestone'>{milestoneIcon}</span>
-							<ul aria-label='Milestone' tabIndex={0}>
-								<li>January 2024</li>
-							</ul>
-						</div>
+
+						{params.assignees && (params.assignees.length > 0) ?
+							<div className='assignees'>
+								<span title='Assignees'>{assigneeIcon}</span>
+								<ul aria-label="Assignees" tabIndex={0}>
+									{params.assignees.map(assignee =>
+										<li>
+											{assignee.login}
+										</li>)}
+								</ul>
+							</div>
+							: null}
+
+						{params.reviewers && (params.reviewers.length > 0) ?
+							<div className='reviewers'>
+								<span title='Reviewers'>{reviewerIcon}</span>
+								<ul aria-label="Reviewers" tabIndex={0}>
+									{params.reviewers.map(reviewer =>
+										<li>
+											{isTeam(reviewer) ? reviewer.slug : reviewer.login}
+										</li>)}
+								</ul>
+							</div>
+							: null}
+
+						{params.labels && (params.labels.length > 0) ?
+							<div className='labels'>
+								<span title='Labels'>{labelIcon}</span>
+								<ul aria-label="Labels" onClick={() => {
+									ctx.postMessage({ command: 'pr.changeLabels', args: null });
+								}}>
+									{params.labels.map(label => <LabelCreate key={label.name} {...label} canDelete isDarkTheme={!!params.isDarkTheme} />)}
+								</ul>
+							</div>
+						: null}
+
+						{params.milestone ?
+							<div className='milestone'>
+								<span title='Milestone'>{milestoneIcon}</span>
+								<ul aria-label="Milestone" tabIndex={0}>
+									<li>
+										{params.milestone.title}
+									</li>
+								</ul>
+							</div>
+							: null}
 					</div>
 
 					<div className='group-description'>
@@ -199,7 +235,8 @@ export function main() {
 							aria-label='Description'
 							value={params.pendingDescription}
 							onChange={(e) => ctx.updateState({ pendingDescription: e.currentTarget.value })}
-							onKeyDown={onKeyDown}></textarea>
+							onKeyDown={onKeyDown}
+							disabled={!ctx.initialized}></textarea>
 					</div>
 
 					<div className={params.validate && !!params.createError ? 'wrapper validation-error' : 'hidden'} aria-live='assertive'>
@@ -209,30 +246,27 @@ export function main() {
 					</div>
 
 					<div className='group-actions'>
-						<div className='merge-method'>
-							{gearIcon}
-							<select name='merge-method' title='Merge Method' aria-label='Merge Method'>
-								<option value='create-merge-commit'>Create Merge Commit</option>
-								<option value='quash-and-merge'>Squash and Merge</option>
-								<option value='rebase-and-merge' selected>Rebase and Merge</option>
-							</select>
-						</div>
 
 						<div className='spacer'></div>
 						<button disabled={isBusy} className='secondary' onClick={() => ctx.cancelCreate()}>
 							Cancel
 						</button>
 						<div className='create-button'>
-							<button className='split-left' disabled={isBusy || !isCreateable} onClick={() => create()}>
-								Create
+							<button className='split-left' disabled={isBusy || !isCreateable || !ctx.initialized} onClick={onCreateButton}>
+								{createMethodLabel(ctx.createParams.isDraft, ctx.createParams.autoMerge, ctx.createParams.autoMergeMethod).label}
 							</button>
 							<div className='split-right'>
 								{chevronDownIcon}
-								<select name='create-action' disabled={isBusy || !isCreateable}
-									title='Create Actions' aria-label='Create Actions'>
-									<option value='create'>Create</option>
-									<option value='create-draft'>Create Draft</option>
-									<option value='create-automerge'>Create and Auto-merge</option>
+								<select ref={createMethodSelect} name='create-action' disabled={isBusy || !isCreateable || !ctx.initialized}
+									title='Create Actions' aria-label='Create Actions'
+									// defaultValue={createMethodLabel(ctx.createParams.isDraft, ctx.createParams.autoMerge, ctx.createParams.autoMergeMethod).value}
+									value={createMethodLabel(ctx.createParams.isDraft, ctx.createParams.autoMerge, ctx.createParams.autoMergeMethod).value}
+									onChange={onCreateButton}>
+									{createMethodOption()}
+									{createMethodOption(true)}
+									{params.allowAutoMerge && params.mergeMethodsAvailability && params.mergeMethodsAvailability['squash'] ? createMethodOption(false, true, 'squash') : null}
+									{params.allowAutoMerge && params.mergeMethodsAvailability && params.mergeMethodsAvailability['rebase'] ? createMethodOption(false, true, 'rebase') : null}
+									{params.allowAutoMerge && params.mergeMethodsAvailability && params.mergeMethodsAvailability['merge'] ? createMethodOption(false, true, 'merge') : null}
 								</select>
 							</div>
 						</div>

@@ -4,15 +4,26 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { createContext } from 'react';
-import { ChooseBaseRemoteAndBranchResult, ChooseCompareRemoteAndBranchResult, ChooseRemoteAndBranchArgs, CreateParamsNew, CreatePullRequest, RemoteInfo, ScrollPosition } from '../../common/views';
+import { ChooseBaseRemoteAndBranchResult, ChooseCompareRemoteAndBranchResult, ChooseRemoteAndBranchArgs, CreateParamsNew, CreatePullRequestNew, RemoteInfo, ScrollPosition } from '../../common/views';
 import { getMessageHandler, MessageHandler, vscode } from './message';
 
 const defaultCreateParams: CreateParamsNew = {
+	defaultBaseRemote: undefined,
+	defaultBaseBranch: undefined,
+	defaultCompareRemote: undefined,
+	defaultCompareBranch: undefined,
 	validate: false,
 	showTitleValidationError: false,
 	labels: [],
 	isDraftDefault: false,
-	autoMergeDefault: false
+	autoMergeDefault: false,
+	assignees: [],
+	reviewers: [],
+	milestone: undefined,
+	defaultTitle: undefined,
+	pendingTitle: undefined,
+	defaultDescription: undefined,
+	pendingDescription: undefined,
 };
 
 export class CreatePRContextNew {
@@ -67,7 +78,8 @@ export class CreatePRContextNew {
 
 		const updateValues: Partial<CreateParamsNew> = {
 			baseRemote: response.baseRemote,
-			baseBranch: response.baseBranch
+			baseBranch: response.baseBranch,
+			createError: ''
 		};
 		if ((this.createParams.baseRemote?.owner !== response.baseRemote.owner) || (this.createParams.baseRemote.repositoryName !== response.baseRemote.repositoryName)) {
 			updateValues.defaultMergeMethod = response.defaultMergeMethod;
@@ -102,7 +114,8 @@ export class CreatePRContextNew {
 
 		const updateValues: Partial<CreateParamsNew> = {
 			compareRemote: response.compareRemote,
-			compareBranch: response.compareBranch
+			compareBranch: response.compareBranch,
+			createError: ''
 		};
 
 		this.updateState(updateValues);
@@ -120,7 +133,7 @@ export class CreatePRContextNew {
 		return isValid;
 	};
 
-	private copyParams(): CreatePullRequest {
+	private copyParams(): CreatePullRequestNew {
 		return {
 			title: this.createParams.pendingTitle!,
 			body: this.createParams.pendingDescription!,
@@ -133,13 +146,16 @@ export class CreatePRContextNew {
 			draft: !!this.createParams.isDraft,
 			autoMerge: !!this.createParams.autoMerge,
 			autoMergeMethod: this.createParams.autoMergeMethod,
-			labels: this.createParams.labels ?? []
+			labels: this.createParams.labels ?? [],
+			assignees: this.createParams.assignees ?? [],
+			reviewers: this.createParams.reviewers ?? [],
+			milestone: this.createParams.milestone
 		};
 	}
 
 	public submit = async (): Promise<void> => {
 		try {
-			const args: CreatePullRequest = this.copyParams();
+			const args: CreatePullRequestNew = this.copyParams();
 			vscode.setState(defaultCreateParams);
 			await this.postMessage({
 				command: 'pr.create',
@@ -229,6 +245,9 @@ export class CreatePRContextNew {
 				return;
 
 			case 'set-labels':
+			case 'set-assignees':
+			case 'set-reviewers':
+			case 'set-milestone':
 				if (!message.params) {
 					return;
 				}
