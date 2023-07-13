@@ -7,7 +7,6 @@
 import * as vscode from 'vscode';
 import { DataUri } from '../common/uri';
 import { formatError } from '../common/utils';
-import { IRequestMessage } from '../common/webview';
 import { FolderRepositoryManager } from './folderRepositoryManager';
 import { GitHubRepository, TeamReviewerRefreshKind } from './githubRepository';
 import { IAccount, IMilestone, isTeam, ISuggestedReviewer, ITeam, reviewerId, ReviewState } from './interface';
@@ -80,11 +79,6 @@ export async function getAssigneesQuickPickItems(folderRepositoryManager: Folder
 			label: vscode.l10n.t('Suggestions')
 		}));
 	}
-
-	assignees.push(Promise.resolve({
-		kind: vscode.QuickPickItemKind.Separator,
-		label: vscode.l10n.t('Users')
-	}));
 
 	for (const user of assignableUsers) {
 		if (skipList.has(user.login)) {
@@ -212,9 +206,11 @@ export async function reviewersQuickPick(folderRepositoryManager: FolderReposito
 	const quickPick = vscode.window.createQuickPick<vscode.QuickPickItem & { reviewer?: IAccount | ITeam }>();
 	// The quick-max is used to show the "update reviewers" button. If the number of teams is less than the quick-max, then they'll be automatically updated when the quick pick is opened.
 	const quickMaxTeamReviewers = 100;
+	const defaultPlaceholder = vscode.l10n.t('Add reviewers');
 	quickPick.busy = true;
 	quickPick.canSelectMany = true;
 	quickPick.matchOnDescription = true;
+	quickPick.placeholder = defaultPlaceholder;
 	quickPick.show();
 	const updateItems = async (refreshKind: TeamReviewerRefreshKind) => {
 		const slowWarning = setTimeout(() => {
@@ -223,7 +219,7 @@ export async function reviewersQuickPick(folderRepositoryManager: FolderReposito
 		quickPick.items = await getReviewersQuickPickItems(folderRepositoryManager, remoteName, isInOrganization, author, existingReviewers, suggestedReviewers, refreshKind);
 		clearTimeout(slowWarning);
 		quickPick.selectedItems = quickPick.items.filter(item => item.picked);
-		quickPick.placeholder = undefined;
+		quickPick.placeholder = defaultPlaceholder;
 	};
 
 	await updateItems((teamsCount !== 0 && teamsCount <= quickMaxTeamReviewers) ? TeamReviewerRefreshKind.Try : TeamReviewerRefreshKind.None);
@@ -247,7 +243,7 @@ function isMilestoneQuickPickItem(x: vscode.QuickPickItem | MilestoneQuickPickIt
 	return !!(x as MilestoneQuickPickItem).id && !!(x as MilestoneQuickPickItem).milestone;
 }
 
-export async function getMilestoneFromQuickPick(folderRepositoryManager: FolderRepositoryManager, githubRepository: GitHubRepository, callback: (milestone: IMilestone, message?: IRequestMessage<void>) => Promise<void>, message?: IRequestMessage<void>): Promise<void> {
+export async function getMilestoneFromQuickPick(folderRepositoryManager: FolderRepositoryManager, githubRepository: GitHubRepository, callback: (milestone: IMilestone) => Promise<void>): Promise<void> {
 	try {
 		async function getMilestoneOptions(): Promise<(MilestoneQuickPickItem | vscode.QuickPickItem)[]> {
 			const milestones = await githubRepository.getMilestones();
@@ -261,6 +257,7 @@ export async function getMilestoneFromQuickPick(folderRepositoryManager: FolderR
 
 			return milestones.map(result => {
 				return {
+					iconPath: new vscode.ThemeIcon('milestone'),
 					label: result.title,
 					id: result.id,
 					milestone: result,
@@ -305,7 +302,7 @@ export async function getMilestoneFromQuickPick(folderRepositoryManager: FolderR
 				try {
 					const milestone = await folderRepositoryManager.createMilestone(githubRepository, inputBox.value);
 					if (milestone !== undefined) {
-						await callback(milestone, message);
+						await callback(milestone);
 					}
 				} catch (e) {
 					if (e.errors && Array.isArray(e.errors) && e.errors.find(error => error.code === 'already_exists') !== undefined) {
@@ -326,7 +323,7 @@ export async function getMilestoneFromQuickPick(folderRepositoryManager: FolderR
 			quickPick.hide();
 			const milestoneToAdd = quickPick.selectedItems[0];
 			if (milestoneToAdd && isMilestoneQuickPickItem(milestoneToAdd)) {
-				await callback(milestoneToAdd.milestone, message);
+				await callback(milestoneToAdd.milestone);
 			}
 		});
 	} catch (e) {

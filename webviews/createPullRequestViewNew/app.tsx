@@ -43,7 +43,9 @@ export function main() {
 					let label: string;
 					if (autoMerge && autoMergeMethod) {
 						value = `create-automerge-${autoMergeMethod}` as CreateMethod;
-						label = `Create & Auto-Merge (${autoMergeMethod})`;
+						const mergeMethodLabel = autoMergeMethod.charAt(0).toUpperCase() + autoMergeMethod.slice(1);
+						label = `Create + Auto-${mergeMethodLabel}`;
+
 					} else if (isDraft) {
 						value = 'create-draft';
 						label = 'Create Draft';
@@ -141,7 +143,7 @@ export function main() {
 								defaultBranch={params.baseBranch}
 								remoteCount={params.remoteCount}
 								isBase={true}
-								disabled={!ctx.initialized} />
+								disabled={!ctx.initialized || isBusy} />
 						</div>
 
 						<div className='input-label merge'>
@@ -153,7 +155,7 @@ export function main() {
 								defaultBranch={params.compareBranch}
 								remoteCount={params.remoteCount}
 								isBase={false}
-								disabled={!ctx.initialized} />
+								disabled={!ctx.initialized || isBusy} />
 						</div>
 					</div>
 
@@ -173,7 +175,7 @@ export function main() {
 							required
 							onChange={(e) => updateTitle(e.currentTarget.value)}
 							onKeyDown={onKeyDown}
-							disabled={!ctx.initialized}>
+							disabled={!ctx.initialized || isBusy}>
 						</input>
 						<div id='title-error' className={params.showTitleValidationError ? 'validation-error below-input-error' : 'hidden'}>A title is required</div>
 					</div>
@@ -236,7 +238,7 @@ export function main() {
 							value={params.pendingDescription}
 							onChange={(e) => ctx.updateState({ pendingDescription: e.currentTarget.value })}
 							onKeyDown={onKeyDown}
-							disabled={!ctx.initialized}></textarea>
+							disabled={!ctx.initialized || isBusy}></textarea>
 					</div>
 
 					<div className={params.validate && !!params.createError ? 'wrapper validation-error' : 'hidden'} aria-live='assertive'>
@@ -246,27 +248,27 @@ export function main() {
 					</div>
 
 					<div className='group-actions'>
-
-						<div className='spacer'></div>
 						<button disabled={isBusy} className='secondary' onClick={() => ctx.cancelCreate()}>
 							Cancel
 						</button>
 						<div className='create-button'>
-							<button className='split-left' disabled={isBusy || !isCreateable || !ctx.initialized} onClick={onCreateButton}>
+							<button className='split-left' disabled={isBusy || !isCreateable || !ctx.initialized} onClick={onCreateButton}
+								title={createMethodLabel(ctx.createParams.isDraft, ctx.createParams.autoMerge, ctx.createParams.autoMergeMethod).label}>
 								{createMethodLabel(ctx.createParams.isDraft, ctx.createParams.autoMerge, ctx.createParams.autoMergeMethod).label}
 							</button>
+							<div className='split'></div>
 							<div className='split-right'>
 								{chevronDownIcon}
 								<select ref={createMethodSelect} name='create-action' disabled={isBusy || !isCreateable || !ctx.initialized}
 									title='Create Actions' aria-label='Create Actions'
-									// defaultValue={createMethodLabel(ctx.createParams.isDraft, ctx.createParams.autoMerge, ctx.createParams.autoMergeMethod).value}
 									value={createMethodLabel(ctx.createParams.isDraft, ctx.createParams.autoMerge, ctx.createParams.autoMergeMethod).value}
 									onChange={onCreateButton}>
 									{createMethodOption()}
 									{createMethodOption(true)}
+									{params.allowAutoMerge ? <option disabled>&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;</option> : null}
+									{params.allowAutoMerge && params.mergeMethodsAvailability && params.mergeMethodsAvailability['merge'] ? createMethodOption(false, true, 'merge') : null}
 									{params.allowAutoMerge && params.mergeMethodsAvailability && params.mergeMethodsAvailability['squash'] ? createMethodOption(false, true, 'squash') : null}
 									{params.allowAutoMerge && params.mergeMethodsAvailability && params.mergeMethodsAvailability['rebase'] ? createMethodOption(false, true, 'rebase') : null}
-									{params.allowAutoMerge && params.mergeMethodsAvailability && params.mergeMethodsAvailability['merge'] ? createMethodOption(false, true, 'merge') : null}
 								</select>
 							</div>
 						</div>
