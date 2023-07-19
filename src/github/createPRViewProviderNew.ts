@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { Buffer } from 'buffer';
 import * as vscode from 'vscode';
 import { ChooseBaseRemoteAndBranchResult, ChooseCompareRemoteAndBranchResult, ChooseRemoteAndBranchArgs, CreateParamsNew, CreatePullRequestNew, RemoteInfo } from '../../common/views';
 import type { Branch, Ref } from '../api/api';
@@ -19,6 +20,7 @@ import {
 	PUSH_BRANCH,
 	SET_AUTO_MERGE,
 } from '../common/settingKeys';
+import { DataUri } from '../common/uri';
 import { asPromise, compareIgnoreCase, formatError } from '../common/utils';
 import { getNonce, IRequestMessage, WebviewViewBase } from '../common/webview';
 import { PREVIOUS_CREATE_METHOD } from '../extensionState';
@@ -444,6 +446,8 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 		quickPick.show();
 		quickPick.busy = true;
 		quickPick.items = githubRepository ? await this.branchPicks(githubRepository, chooseDifferentRemote, isBase) : await this.remotePicks(isBase);
+		const activeItem = message.args.currentBranch ? quickPick.items.find(item => item.branch === message.args.currentBranch) : undefined;
+		quickPick.activeItems = activeItem ? [activeItem] : [];
 		quickPick.busy = false;
 		const remoteAndBranch: Promise<{ remote: RemoteInfo, branch: string } | undefined> = new Promise((resolve) => {
 			quickPick.onDidAccept(async () => {
@@ -623,7 +627,10 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 			return newLabels.map(label => {
 				return {
 					label: label.name,
-					picked: labels.some(existingLabel => existingLabel.name === label.name)
+					picked: labels.some(existingLabel => existingLabel.name === label.name),
+					iconPath: DataUri.asImageDataURI(Buffer.from(`<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+						<rect x="2" y="2" width="12" height="12" rx="6" fill="#${label.color}"/>
+						</svg>`, 'utf8'))
 				};
 			});
 		}
@@ -841,6 +848,15 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 
 			case 'pr.changeLabels':
 				return this.addLabels();
+
+			case 'pr.changeReviewers':
+				return this.addReviewers();
+
+			case 'pr.changeAssignees':
+				return this.addAssignees();
+
+			case 'pr.changeMilestone':
+				return this.addMilestone();
 
 			case 'pr.removeLabel':
 				return this.removeLabel(message);

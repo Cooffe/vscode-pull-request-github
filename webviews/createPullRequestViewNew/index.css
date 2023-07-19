@@ -4,12 +4,13 @@
  *--------------------------------------------------------------------------------------------*/
 
 
-:disabled {
-	opacity: 0.4;
-}
-
 body {
 	padding: 0 20px;
+}
+
+input:disabled,
+textarea:disabled {
+	opacity: 0.4;
 }
 
 .group-main {
@@ -25,12 +26,6 @@ body {
 	height: 16px;
 }
 
-/*
-svg,
-svg path {
-	fill: var(--vscode-foreground);
-}
-*/
 
 /* Base + Merge Branches */
 
@@ -76,7 +71,6 @@ svg path {
 	color: var(--vscode-inputOption-activeForeground) !important;
 	background-color: var(--vscode-inputOption-activeBackground) !important;
 }
-
 
 .merge {
 	padding-left: 28px;
@@ -218,12 +212,6 @@ textarea {
 	width: 100%;
 }
 
-
-/* TODO: Check style on Windows */
-option {
-	color: var(--vscode-dropdown-foreground);
-}
-
 .create-button {
 	display: flex;
 	flex-grow: 1;
@@ -234,9 +222,9 @@ option {
 .split-left {
 	flex-grow: 1;
 	border-radius: 2px 0 0 2px;
-	overflow: hidden !important;
-	white-space: nowrap !important;
-	text-overflow: ellipsis !important;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
 }
 
 .split {
@@ -255,12 +243,21 @@ option {
 	top: 6px; right: 4px;
 }
 
+.split-right select:disabled {
+	opacity: 1;
+}
+
+.split-right:has(select:disabled) {
+	opacity: 0.4 !important;
+}
+
 .split-right .icon svg path {
 	fill: var(--vscode-button-foreground);
 }
 
 .split-right:has(select:disabled) .icon svg path {
-	opacity: 0.4;
+	fill: var(--vscode-button-foreground);
+	opacity: 1;
 }
 
 .split-right select {
@@ -270,13 +267,20 @@ option {
 	width: 24px; height: 28px;
 	border-left: 1px solid rgba(0, 0, 0, 0.2);
 	border-radius: 0 2px 2px 0;
-	padding: inherit;
 	background-color: var(--vscode-button-background);
 	border: 1px solid var(--vscode-contrastBorder);
 }
 
-select:disabled {
+.split-right select:disabled {
 	cursor: default;
+}
+
+.split-right select option {
+	background-color: revert;
+	color: revert;
+	border: revert;
+	border-radius: revert;
+	padding: revert;
 }
 
 .split-right select:focus,

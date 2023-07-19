@@ -18,7 +18,7 @@ type CreateMethod = 'create-draft' | 'create' | 'create-automerge-squash' | 'cre
 export const ChooseRemoteAndBranch = ({ onClick, defaultRemote, defaultBranch, isBase, remoteCount = 0, disabled }:
 	{ onClick: (remote?: RemoteInfo, branch?: string) => Promise<void>, defaultRemote: RemoteInfo | undefined, defaultBranch: string | undefined, isBase: boolean, remoteCount: number | undefined, disabled: boolean }) => {
 
-	const defaultsLabel = (defaultRemote && defaultBranch) ? `${remoteCount > 1 ? `${defaultRemote.owner}/` : ''}${defaultBranch}` : '-';
+	const defaultsLabel = (defaultRemote && defaultBranch) ? `${remoteCount > 1 ? `${defaultRemote.owner}/` : ''}${defaultBranch}` : '&mdash;';
 	const title = isBase ? 'Base branch: ' + defaultsLabel : 'Branch to merge: ' + defaultsLabel;
 
 	return <ErrorBoundary>
@@ -185,7 +185,9 @@ export function main() {
 						{params.assignees && (params.assignees.length > 0) ?
 							<div className='assignees'>
 								<span title='Assignees'>{assigneeIcon}</span>
-								<ul aria-label="Assignees" tabIndex={0}>
+								<ul aria-label="Assignees" tabIndex={0} onClick={() => {
+									ctx.postMessage({ command: 'pr.changeAssignees' });
+								}}>
 									{params.assignees.map(assignee =>
 										<li>
 											{assignee.login}
@@ -197,7 +199,9 @@ export function main() {
 						{params.reviewers && (params.reviewers.length > 0) ?
 							<div className='reviewers'>
 								<span title='Reviewers'>{reviewerIcon}</span>
-								<ul aria-label="Reviewers" tabIndex={0}>
+								<ul aria-label="Reviewers" tabIndex={0} onClick={() => {
+									ctx.postMessage({ command: 'pr.changeReviewers' });
+								}}>
 									{params.reviewers.map(reviewer =>
 										<li>
 											{isTeam(reviewer) ? reviewer.slug : reviewer.login}
@@ -209,8 +213,8 @@ export function main() {
 						{params.labels && (params.labels.length > 0) ?
 							<div className='labels'>
 								<span title='Labels'>{labelIcon}</span>
-								<ul aria-label="Labels" onClick={() => {
-									ctx.postMessage({ command: 'pr.changeLabels', args: null });
+								<ul aria-label="Labels" tabIndex={0} onClick={() => {
+									ctx.postMessage({ command: 'pr.changeLabels' });
 								}}>
 									{params.labels.map(label => <LabelCreate key={label.name} {...label} canDelete isDarkTheme={!!params.isDarkTheme} />)}
 								</ul>
@@ -220,7 +224,9 @@ export function main() {
 						{params.milestone ?
 							<div className='milestone'>
 								<span title='Milestone'>{milestoneIcon}</span>
-								<ul aria-label="Milestone" tabIndex={0}>
+								<ul aria-label="Milestone" tabIndex={0} onClick={() => {
+									ctx.postMessage({ command: 'pr.changeMilestone' });
+								}}>
 									<li>
 										{params.milestone.title}
 									</li>
