@@ -30,6 +30,8 @@ export const REMOTES = 'remotes';
 export const PULL_PR_BRANCH_BEFORE_CHECKOUT = 'pullPullRequestBranchBeforeCheckout';
 export const EXPERIMENTAL_ACCOUNT_BADGE = 'experimental.accountBadge';
 export const EXPERIMENTAL_CREATE_VIEW = 'experimental.createView';
+export const UPSTREAM_REMOTE = 'upstreamRemote';
+export const DEFAULT_CREATE_OPTION = 'defaultCreateOption';
 
 export const ISSUES_SETTINGS_NAMESPACE = 'githubIssues';
 export const ASSIGN_WHEN_WORKING = 'assignWhenWorking';

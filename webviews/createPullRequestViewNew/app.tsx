@@ -12,13 +12,14 @@ import PullRequestContextNew from '../common/createContextNew';
 import { ErrorBoundary } from '../common/errorBoundary';
 import { LabelCreate } from '../common/label';
 import { assigneeIcon, chevronDownIcon, labelIcon, milestoneIcon, prBaseIcon, prMergeIcon, reviewerIcon } from '../components/icon';
+import { Avatar } from '../components/user';
 
 type CreateMethod = 'create-draft' | 'create' | 'create-automerge-squash' | 'create-automerge-rebase' | 'create-automerge-merge';
 
 export const ChooseRemoteAndBranch = ({ onClick, defaultRemote, defaultBranch, isBase, remoteCount = 0, disabled }:
 	{ onClick: (remote?: RemoteInfo, branch?: string) => Promise<void>, defaultRemote: RemoteInfo | undefined, defaultBranch: string | undefined, isBase: boolean, remoteCount: number | undefined, disabled: boolean }) => {
 
-	const defaultsLabel = (defaultRemote && defaultBranch) ? `${remoteCount > 1 ? `${defaultRemote.owner}/` : ''}${defaultBranch}` : '&mdash;';
+	const defaultsLabel = (defaultRemote && defaultBranch) ? `${remoteCount > 1 ? `${defaultRemote.owner}/` : ''}${defaultBranch}` : '\u2014';
 	const title = isBase ? 'Base branch: ' + defaultsLabel : 'Branch to merge: ' + defaultsLabel;
 
 	return <ErrorBoundary>
@@ -37,7 +38,7 @@ export function main() {
 		<Root>
 			{(params: CreateParamsNew) => {
 				const ctx = useContext(PullRequestContextNew);
-				const [isBusy, setBusy] = useState(false);
+				const [isBusy, setBusy] = useState(params.creating);
 				function createMethodLabel(isDraft?: boolean, autoMerge?: boolean, autoMergeMethod?: MergeMethod): { value: CreateMethod, label: string } {
 					let value: CreateMethod;
 					let label: string;
@@ -55,10 +56,6 @@ export function main() {
 					}
 
 					return {value, label};
-				}
-				function createMethodOption(isDraft?: boolean, autoMerge?: boolean, autoMergeMethod?: MergeMethod) {
-					const {value, label} = createMethodLabel(isDraft, autoMerge, autoMergeMethod);
-					return <option value={value}>{label}</option>;
 				}
 
 				const titleInput = useRef<HTMLInputElement>() as React.MutableRefObject<HTMLInputElement>;
@@ -100,10 +97,9 @@ export function main() {
 					},
 					[create],
 				);
-				const createMethodSelect: React.MutableRefObject<HTMLSelectElement> = React.useRef<HTMLSelectElement>() as React.MutableRefObject<HTMLSelectElement>;
 
-				const onCreateButton = () => {
-					const selected = createMethodSelect.current?.value as CreateMethod;
+				const onCreateButton: React.MouseEventHandler<HTMLButtonElement> = (event) => {
+					const selected = (event.target as HTMLButtonElement).value as CreateMethod;
 					let isDraft = false;
 					let autoMerge = false;
 					let autoMergeMethod: MergeMethod | undefined;
@@ -132,11 +128,45 @@ export function main() {
 					return create();
 				};
 
-				return <div className='group-main'>
+				function makeCreateMenuContext(createParams: CreateParamsNew) {
+					const createMenuContexts = {
+						'preventDefaultContextMenuItems': true,
+						'github:createPrMenu': true,
+						'github:createPrMenuDraft': true
+					};
+					if (createParams.allowAutoMerge && createParams.mergeMethodsAvailability && createParams.mergeMethodsAvailability['merge']) {
+						createMenuContexts['github:createPrMenuMerge'] = true;
+					}
+					if (createParams.allowAutoMerge && createParams.mergeMethodsAvailability && createParams.mergeMethodsAvailability['squash']) {
+						createMenuContexts['github:createPrMenuSquash'] = true;
+					}
+					if (createParams.allowAutoMerge && createParams.mergeMethodsAvailability && createParams.mergeMethodsAvailability['rebase']) {
+						createMenuContexts['github:createPrMenuRebase'] = true;
+					}
+					const stringified = JSON.stringify(createMenuContexts);
+					return stringified;
+				}
+
+				if (params.creating) {
+					create();
+				}
+
+				function activateCommand(event: MouseEvent | KeyboardEvent, command: string): void {
+					if (event instanceof KeyboardEvent) {
+						if (event.key === 'Enter' || event.key === ' ') {
+							event.preventDefault();
+							ctx.postMessage({ command: command });
+						}
+					} else if (event instanceof MouseEvent) {
+						ctx.postMessage({ command: command });
+					}
+				}
+
+				return <div className='group-main' data-vscode-context='{"preventDefaultContextMenuItems": true}'>
 					<div className='group-branches'>
 						<div className='input-label base'>
 							<div className="deco">
-								<span title='Base branch'>{prBaseIcon} Base</span>
+								<span title='Base branch' aria-hidden='true'>{prBaseIcon} Base</span>
 							</div>
 							<ChooseRemoteAndBranch onClick={ctx.changeBaseRemoteAndBranch}
 								defaultRemote={params.baseRemote}
@@ -148,7 +178,7 @@ export function main() {
 
 						<div className='input-label merge'>
 							<div className="deco">
-								<span title='Merge branch'>{prMergeIcon} Merge</span>
+								<span title='Merge branch' aria-hidden='true'>{prMergeIcon} Merge</span>
 							</div>
 							<ChooseRemoteAndBranch onClick={ctx.changeMergeRemoteAndBranch}
 								defaultRemote={params.compareRemote}
@@ -175,22 +205,26 @@ export function main() {
 							required
 							onChange={(e) => updateTitle(e.currentTarget.value)}
 							onKeyDown={onKeyDown}
+							data-vscode-context='{"preventDefaultContextMenuItems": false}'
 							disabled={!ctx.initialized || isBusy}>
 						</input>
 						<div id='title-error' className={params.showTitleValidationError ? 'validation-error below-input-error' : 'hidden'}>A title is required</div>
 					</div>
 
 					<div className='group-additions'>
-
 						{params.assignees && (params.assignees.length > 0) ?
 							<div className='assignees'>
-								<span title='Assignees'>{assigneeIcon}</span>
-								<ul aria-label="Assignees" tabIndex={0} onClick={() => {
-									ctx.postMessage({ command: 'pr.changeAssignees' });
-								}}>
+								<span title='Assignees' aria-hidden='true'>{assigneeIcon}</span>
+								<ul aria-label='Assignees' tabIndex={0} role='button'
+									onClick={(e) => activateCommand(e.nativeEvent, 'pr.changeAssignees')}
+									onKeyPress={(e) => activateCommand(e.nativeEvent, 'pr.changeAssignees')}
+								>
 									{params.assignees.map(assignee =>
 										<li>
-											{assignee.login}
+											<span title={assignee.name} aria-label={assignee.name}>
+												<Avatar for={assignee} link={false} />
+												{assignee.login}
+											</span>
 										</li>)}
 								</ul>
 							</div>
@@ -198,13 +232,17 @@ export function main() {
 
 						{params.reviewers && (params.reviewers.length > 0) ?
 							<div className='reviewers'>
-								<span title='Reviewers'>{reviewerIcon}</span>
-								<ul aria-label="Reviewers" tabIndex={0} onClick={() => {
-									ctx.postMessage({ command: 'pr.changeReviewers' });
-								}}>
+								<span title='Reviewers' aria-hidden='true'>{reviewerIcon}</span>
+								<ul aria-label='Reviewers' tabIndex={0} role='button'
+									onClick={(e) => activateCommand(e.nativeEvent, 'pr.changeReviewers')}
+									onKeyPress={(e) => activateCommand(e.nativeEvent, 'pr.changeReviewers')}
+								>
 									{params.reviewers.map(reviewer =>
 										<li>
-											{isTeam(reviewer) ? reviewer.slug : reviewer.login}
+											<span title={reviewer.name} aria-label={reviewer.name}>
+												<Avatar for={reviewer} link={false} />
+												{isTeam(reviewer) ? reviewer.slug : reviewer.login}
+											</span>
 										</li>)}
 								</ul>
 							</div>
@@ -212,10 +250,11 @@ export function main() {
 
 						{params.labels && (params.labels.length > 0) ?
 							<div className='labels'>
-								<span title='Labels'>{labelIcon}</span>
-								<ul aria-label="Labels" tabIndex={0} onClick={() => {
-									ctx.postMessage({ command: 'pr.changeLabels' });
-								}}>
+								<span title='Labels' aria-hidden='true'>{labelIcon}</span>
+								<ul aria-label='Labels' tabIndex={0} role='button'
+									onClick={(e) => activateCommand(e.nativeEvent, 'pr.changeLabels')}
+									onKeyPress={(e) => activateCommand(e.nativeEvent, 'pr.changeLabels')}
+								>
 									{params.labels.map(label => <LabelCreate key={label.name} {...label} canDelete isDarkTheme={!!params.isDarkTheme} />)}
 								</ul>
 							</div>
@@ -223,10 +262,11 @@ export function main() {
 
 						{params.milestone ?
 							<div className='milestone'>
-								<span title='Milestone'>{milestoneIcon}</span>
-								<ul aria-label="Milestone" tabIndex={0} onClick={() => {
-									ctx.postMessage({ command: 'pr.changeMilestone' });
-								}}>
+								<span title='Milestone' aria-hidden='true'>{milestoneIcon}</span>
+								<ul aria-label='Milestone' tabIndex={0} role='button'
+									onClick={(e) => activateCommand(e.nativeEvent, 'pr.changeMilestone')}
+									onKeyPress={(e) => activateCommand(e.nativeEvent, 'pr.changeMilestone')}
+								>
 									<li>
 										{params.milestone.title}
 									</li>
@@ -244,6 +284,7 @@ export function main() {
 							value={params.pendingDescription}
 							onChange={(e) => ctx.updateState({ pendingDescription: e.currentTarget.value })}
 							onKeyDown={onKeyDown}
+							data-vscode-context='{"preventDefaultContextMenuItems": false}'
 							disabled={!ctx.initialized || isBusy}></textarea>
 					</div>
 
@@ -258,25 +299,21 @@ export function main() {
 							Cancel
 						</button>
 						<div className='create-button'>
-							<button className='split-left' disabled={isBusy || !isCreateable || !ctx.initialized} onClick={onCreateButton}
+							<button className='split-left' disabled={isBusy || !isCreateable || !ctx.initialized} onClick={onCreateButton} value={createMethodLabel(ctx.createParams.isDraft, ctx.createParams.autoMerge, ctx.createParams.autoMergeMethod).value}
 								title={createMethodLabel(ctx.createParams.isDraft, ctx.createParams.autoMerge, ctx.createParams.autoMergeMethod).label}>
 								{createMethodLabel(ctx.createParams.isDraft, ctx.createParams.autoMerge, ctx.createParams.autoMergeMethod).label}
 							</button>
 							<div className='split'></div>
-							<div className='split-right'>
+							<button className='split-right' title='Create with Option' disabled={isBusy || !isCreateable || !ctx.initialized} onClick={(e) => {
+								e.preventDefault();
+								const rect = (e.target as HTMLElement).getBoundingClientRect();
+								const x = rect.left;
+								const y = rect.bottom;
+								e.target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: x, clientY: y }));
+								e.stopPropagation();
+							}} data-vscode-context={makeCreateMenuContext(params)}>
 								{chevronDownIcon}
-								<select ref={createMethodSelect} name='create-action' disabled={isBusy || !isCreateable || !ctx.initialized}
-									title='Create Actions' aria-label='Create Actions'
-									value={createMethodLabel(ctx.createParams.isDraft, ctx.createParams.autoMerge, ctx.createParams.autoMergeMethod).value}
-									onChange={onCreateButton}>
-									{createMethodOption()}
-									{createMethodOption(true)}
-									{params.allowAutoMerge ? <option disabled>&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;</option> : null}
-									{params.allowAutoMerge && params.mergeMethodsAvailability && params.mergeMethodsAvailability['merge'] ? createMethodOption(false, true, 'merge') : null}
-									{params.allowAutoMerge && params.mergeMethodsAvailability && params.mergeMethodsAvailability['squash'] ? createMethodOption(false, true, 'squash') : null}
-									{params.allowAutoMerge && params.mergeMethodsAvailability && params.mergeMethodsAvailability['rebase'] ? createMethodOption(false, true, 'rebase') : null}
-								</select>
-							</div>
+							</button>
 						</div>
 					</div>
 				</div>;

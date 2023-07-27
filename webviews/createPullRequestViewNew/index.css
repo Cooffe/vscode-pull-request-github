@@ -30,7 +30,7 @@ textarea:disabled {
 /* Base + Merge Branches */
 
 .group-branches {
-	margin-top: 28px;
+	margin-top: 20px;
 	margin-bottom: 10px;
 }
 
@@ -58,18 +58,26 @@ textarea:disabled {
 	overflow: hidden;
 	white-space: nowrap;
 	text-overflow: ellipsis;
-	color: var(--vscode-button-secondaryForeground) !important;
-	background-color: var(--vscode-button-secondaryBackground) !important;
+	color: var(--vscode-input-foreground) !important;
+	background-color: var(--vscode-input-background) !important;
 }
 
 .base button:active,
 .base button:focus,
-.base button:hover,
 .merge button:active,
-.merge button:focus,
-.merge button:hover {
+.merge button:focus {
 	color: var(--vscode-inputOption-activeForeground) !important;
 	background-color: var(--vscode-inputOption-activeBackground) !important;
+}
+
+.base button:hover:not(:disabled),
+.merge button:hover:not(:disabled) {
+	background-color: var(--vscode-inputOption-hoverBackground) !important;
+}
+
+.base button:focus,
+.merge button:focus {
+	border-color: var(--vscode-focusBorder) !important;
 }
 
 .merge {
@@ -114,7 +122,7 @@ textarea {
 
 textarea {
 	height: 100%;
-	min-height: 128px;
+	min-height: 96px;
 	resize: none;
 }
 
@@ -168,6 +176,12 @@ textarea {
 	height: 16px;
 }
 
+.group-additions img.avatar,
+.group-additions img.avatar-icon {
+	margin-right: 4px;
+	width: 16px; height: 16px;
+}
+
 .group-additions ul {
 	display: flex;
 	align-content: flex-start;
@@ -208,7 +222,7 @@ textarea {
 	display: flex;
 	gap: 8px;
 	margin-top: 10px;
-	margin-bottom: 24px;
+	margin-bottom: 20px;
 	width: 100%;
 }
 
@@ -216,12 +230,11 @@ textarea {
 	display: flex;
 	flex-grow: 1;
 	min-width: 0;
-
 }
 
-.split-left {
-	flex-grow: 1;
+button.split-left {
 	border-radius: 2px 0 0 2px;
+	flex-grow: 1;
 	overflow: hidden;
 	white-space: nowrap;
 	text-overflow: ellipsis;
@@ -233,59 +246,23 @@ textarea {
 	opacity: 0.5;
 }
 
-.split-right {
+button.split-right {
+	border-radius: 0 2px 2px 0;
+	cursor: pointer;
+	width: 24px; height: 28px;
 	position: relative;
 }
 
-.split-right .icon {
+button.split-right:disabled {
+	cursor: default;
+}
+
+button.split-right .icon {
 	pointer-events: none;
 	position: absolute;
 	top: 6px; right: 4px;
 }
 
-.split-right select:disabled {
-	opacity: 1;
-}
-
-.split-right:has(select:disabled) {
-	opacity: 0.4 !important;
-}
-
-.split-right .icon svg path {
+button.split-right .icon svg path {
 	fill: var(--vscode-button-foreground);
-}
-
-.split-right:has(select:disabled) .icon svg path {
-	fill: var(--vscode-button-foreground);
-	opacity: 1;
-}
-
-.split-right select {
-	color: transparent;
-	appearance: none;
-	cursor: pointer;
-	width: 24px; height: 28px;
-	border-left: 1px solid rgba(0, 0, 0, 0.2);
-	border-radius: 0 2px 2px 0;
-	background-color: var(--vscode-button-background);
-	border: 1px solid var(--vscode-contrastBorder);
-}
-
-.split-right select:disabled {
-	cursor: default;
-}
-
-.split-right select option {
-	background-color: revert;
-	color: revert;
-	border: revert;
-	border-radius: revert;
-	padding: revert;
-}
-
-.split-right select:focus,
-.split-right select:hover:not(:disabled) {
-	outline: none;
-	background-color: var(--vscode-button-hoverBackground);
-	border: 1px solid var(--vscode-contrastActiveBorder);
 }

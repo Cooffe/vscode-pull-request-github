@@ -3,7 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Buffer } from 'buffer';
 import * as vscode from 'vscode';
 import { ChooseBaseRemoteAndBranchResult, ChooseCompareRemoteAndBranchResult, ChooseRemoteAndBranchArgs, CreateParamsNew, CreatePullRequestNew, RemoteInfo } from '../../common/views';
 import type { Branch, Ref } from '../api/api';
@@ -14,13 +13,11 @@ import { Protocol } from '../common/protocol';
 import { GitHubRemote } from '../common/remote';
 import {
 	ASSIGN_TO,
-	CREATE_DRAFT,
+	DEFAULT_CREATE_OPTION,
 	PR_SETTINGS_NAMESPACE,
 	PULL_REQUEST_DESCRIPTION,
-	PUSH_BRANCH,
-	SET_AUTO_MERGE,
+	PUSH_BRANCH
 } from '../common/settingKeys';
-import { DataUri } from '../common/uri';
 import { asPromise, compareIgnoreCase, formatError } from '../common/utils';
 import { getNonce, IRequestMessage, WebviewViewBase } from '../common/webview';
 import { PREVIOUS_CREATE_METHOD } from '../extensionState';
@@ -36,14 +33,14 @@ import { IAccount, ILabel, IMilestone, isTeam, ITeam, MergeMethod, RepoAccessAnd
 import { PullRequestGitHelper } from './pullRequestGitHelper';
 import { PullRequestModel } from './pullRequestModel';
 import { getDefaultMergeMethod } from './pullRequestOverview';
-import { getAssigneesQuickPickItems, getMilestoneFromQuickPick, reviewersQuickPick } from './quickPicks';
+import { getAssigneesQuickPickItems, getLabelOptions, getMilestoneFromQuickPick, reviewersQuickPick } from './quickPicks';
 import { ISSUE_EXPRESSION, parseIssueExpressionOutput, variableSubstitution } from './utils';
 
 const ISSUE_CLOSING_KEYWORDS = new RegExp('closes|closed|close|fixes|fixed|fix|resolves|resolved|resolve\s$', 'i'); // https://docs.github.com/en/issues/tracking-your-work-with-issues/linking-a-pull-request-to-an-issue#linking-a-pull-request-to-an-issue-using-a-keyword
 
 export class CreatePullRequestViewProviderNew extends WebviewViewBase implements vscode.WebviewViewProvider, vscode.Disposable {
 	private static readonly ID = 'CreatePullRequestViewProvider';
-	public readonly viewType = 'github:createPullRequest';
+	public readonly viewType = 'github:createPullRequestWebview';
 
 	private _onDone = new vscode.EventEmitter<PullRequestModel | undefined>();
 	readonly onDone: vscode.Event<PullRequestModel | undefined> = this._onDone.event;
@@ -114,7 +111,7 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 				};
 				if (!branchRemoteChanged) {
 					return this._postMessage({
-						command: 'reset',
+						command: 'pr.initialize',
 						params,
 					});
 				}
@@ -272,6 +269,9 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 			owner: detectedBaseMetadata?.owner ?? this._pullRequestDefaults.owner,
 			repositoryName: detectedBaseMetadata?.repositoryName ?? this._pullRequestDefaults.repo,
 		};
+		if (defaultBaseRemote.owner !== this._pullRequestDefaults.owner || defaultBaseRemote.repositoryName !== this._pullRequestDefaults.repo) {
+			this._onDidChangeBaseRemote.fire(defaultBaseRemote);
+		}
 
 		const defaultOrigin = await this._folderRepositoryManager.getOrigin(this.defaultCompareBranch);
 		const defaultCompareRemote: RemoteInfo = {
@@ -280,21 +280,35 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 		};
 
 		const defaultBaseBranch = detectedBaseMetadata?.branch ?? this._pullRequestDefaults.base;
+		if (defaultBaseBranch !== this._pullRequestDefaults.base) {
+			this._onDidChangeBaseBranch.fire(defaultBaseBranch);
+		}
+
 		const [defaultTitleAndDescription, mergeConfiguration, viewerPermission] = await Promise.all([
 			this.getTitleAndDescription(this.defaultCompareBranch, defaultBaseBranch),
 			this.getMergeConfiguration(defaultBaseRemote.owner, defaultBaseRemote.repositoryName),
 			await defaultOrigin.getViewerPermission()
 		]);
 
+		const defaultCreateOption = vscode.workspace.getConfiguration(PR_SETTINGS_NAMESPACE).get<'lastUsed' | 'create' | 'createDraft' | 'createAutoMerge'>(DEFAULT_CREATE_OPTION, 'lastUsed');
 		const lastCreateMethod: { autoMerge: boolean, mergeMethod: MergeMethod | undefined, isDraft: boolean } | undefined = this._folderRepositoryManager.context.workspaceState.get<{ autoMerge: boolean, mergeMethod: MergeMethod, isDraft } | undefined>(PREVIOUS_CREATE_METHOD, undefined);
 		const repoMergeMethod = getDefaultMergeMethod(mergeConfiguration.mergeMethodsAvailability);
-		const defaultMergeMethod = lastCreateMethod?.mergeMethod ?? repoMergeMethod;
 
-		const draftSetting = vscode.workspace.getConfiguration(PR_SETTINGS_NAMESPACE).get(CREATE_DRAFT, false);
-		const isDraftDefault = lastCreateMethod?.isDraft ?? draftSetting;
+		// default values are for 'create'
+		let defaultMergeMethod: MergeMethod = repoMergeMethod;
+		let isDraftDefault: boolean = false;
+		let autoMergeDefault: boolean = false;
+		defaultMergeMethod = (defaultCreateOption === 'lastUsed' && lastCreateMethod?.mergeMethod) ? lastCreateMethod?.mergeMethod : repoMergeMethod;
 
-		const autoMergeSetting = (vscode.workspace.getConfiguration(PR_SETTINGS_NAMESPACE).get<boolean>(SET_AUTO_MERGE, false) === true);
-		const autoMergeDefault = mergeConfiguration.viewerCanAutoMerge && (lastCreateMethod?.autoMerge ?? autoMergeSetting);
+		if (defaultCreateOption === 'lastUsed') {
+			defaultMergeMethod = lastCreateMethod?.mergeMethod ?? repoMergeMethod;
+			isDraftDefault = !!lastCreateMethod?.isDraft;
+			autoMergeDefault = mergeConfiguration.viewerCanAutoMerge && !!lastCreateMethod?.autoMerge;
+		} else if (defaultCreateOption === 'createDraft') {
+			isDraftDefault = true;
+		} else if (defaultCreateOption === 'createAutoMerge') {
+			autoMergeDefault = mergeConfiguration.viewerCanAutoMerge;
+		}
 		commands.setContext(contexts.CREATE_PR_PERMISSIONS, viewerPermission);
 
 		const params: CreateParamsNew = {
@@ -312,7 +326,8 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 			createError: '',
 			labels: this.labels,
 			isDraftDefault,
-			isDarkTheme: vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
+			isDarkTheme: vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark,
+			creating: false
 		};
 
 		Logger.appendLine(`Initializing "create" view: ${JSON.stringify(params)}`, CreatePullRequestViewProviderNew.ID);
@@ -389,6 +404,13 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 			this._baseRemote = result.remote;
 			const compareBranch = await this._folderRepositoryManager.repository.getBranch(this._compareBranch);
 			const [mergeConfiguration, titleAndDescription] = await Promise.all([this.getMergeConfiguration(result.remote.owner, result.remote.repositoryName), this.getTitleAndDescription(compareBranch, this._baseBranch)]);
+			let autoMergeDefault = false;
+			if (mergeConfiguration.viewerCanAutoMerge) {
+				const defaultCreateOption = vscode.workspace.getConfiguration(PR_SETTINGS_NAMESPACE).get<'lastUsed' | 'create' | 'createDraft' | 'createAutoMerge'>(DEFAULT_CREATE_OPTION, 'lastUsed');
+				const lastCreateMethod: { autoMerge: boolean, mergeMethod: MergeMethod | undefined, isDraft: boolean } | undefined = this._folderRepositoryManager.context.workspaceState.get<{ autoMerge: boolean, mergeMethod: MergeMethod, isDraft } | undefined>(PREVIOUS_CREATE_METHOD, undefined);
+				autoMergeDefault = (defaultCreateOption === 'lastUsed' && lastCreateMethod?.autoMerge) || (defaultCreateOption === 'createAutoMerge');
+			}
+
 			chooseResult = {
 				baseRemote: result.remote,
 				baseBranch: result.branch,
@@ -396,7 +418,7 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 				defaultMergeMethod: getDefaultMergeMethod(mergeConfiguration.mergeMethodsAvailability),
 				allowAutoMerge: mergeConfiguration.viewerCanAutoMerge,
 				mergeMethodsAvailability: mergeConfiguration.mergeMethodsAvailability,
-				autoMergeDefault: mergeConfiguration.viewerCanAutoMerge && (vscode.workspace.getConfiguration(PR_SETTINGS_NAMESPACE).get<boolean>(SET_AUTO_MERGE, false) === true),
+				autoMergeDefault,
 				defaultTitle: titleAndDescription.title,
 				defaultDescription: titleAndDescription.description
 			};
@@ -617,26 +639,11 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 	public async addLabels(): Promise<void> {
 		let newLabels: ILabel[] = [];
 
-		async function getLabelOptions(
-			folderRepoManager: FolderRepositoryManager,
-			labels: ILabel[],
-			base: RemoteInfo
-		): Promise<vscode.QuickPickItem[]> {
-			newLabels = await folderRepoManager.getLabels(undefined, { owner: base.owner, repo: base.repositoryName });
-
-			return newLabels.map(label => {
-				return {
-					label: label.name,
-					picked: labels.some(existingLabel => existingLabel.name === label.name),
-					iconPath: DataUri.asImageDataURI(Buffer.from(`<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-						<rect x="2" y="2" width="12" height="12" rx="6" fill="#${label.color}"/>
-						</svg>`, 'utf8'))
-				};
-			});
-		}
-
 		const labelsToAdd = await vscode.window.showQuickPick(
-			getLabelOptions(this._folderRepositoryManager, this.labels, this._baseRemote),
+			getLabelOptions(this._folderRepositoryManager, this.labels, this._baseRemote).then(options => {
+				newLabels = options.newLabels;
+				return options.labelPicks;
+			}) as Promise<vscode.QuickPickItem[]>,
 			{ canPickMany: true, placeHolder: vscode.l10n.t('Apply labels') },
 		);
 
@@ -688,6 +695,19 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 		}
 	}
 
+	public async createFromCommand(isDraft: boolean, autoMerge: boolean, autoMergeMethod: MergeMethod | undefined) {
+		const params: Partial<CreateParamsNew> = {
+			isDraft,
+			autoMerge,
+			autoMergeMethod,
+			creating: true
+		};
+		return this._postMessage({
+			command: 'create',
+			params
+		});
+	}
+
 	private async create(message: IRequestMessage<CreatePullRequestNew>): Promise<void> {
 		Logger.debug(`Creating pull request with args ${JSON.stringify(message.args)}`, CreatePullRequestViewProviderNew.ID);
 
@@ -704,7 +724,7 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 				this.setMilestone(createdPR, message.args.milestone)]);
 		};
 
-		vscode.window.withProgress({ location: { viewId: 'github:createPullRequest' } }, () => {
+		vscode.window.withProgress({ location: { viewId: 'github:createPullRequestWebview' } }, () => {
 			return vscode.window.withProgress({ location: vscode.ProgressLocation.Notification }, async progress => {
 				let totalIncrement = 0;
 				progress.report({ message: vscode.l10n.t('Checking for upstream branch'), increment: totalIncrement });
@@ -730,7 +750,7 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 						const pushBranchSetting =
 							vscode.workspace.getConfiguration(PR_SETTINGS_NAMESPACE).get(PUSH_BRANCH) === 'always';
 						const messageResult = !pushBranchSetting ? await vscode.window.showInformationMessage(
-							vscode.l10n.t('There is no upstream branch for \'{0}\'.\n\nDo you want to publish it and then create the pull request?', compareBranchName),
+							vscode.l10n.t('There is no remote branch on {0}/{1} for \'{2}\'.\n\nDo you want to publish it and then create the pull request?', compareOwner, compareRepositoryName, compareBranchName),
 							{ modal: true },
 							publish,
 							alwaysPublish)
@@ -754,7 +774,7 @@ export class CreatePullRequestViewProviderNew extends WebviewViewBase implements
 						}
 					}
 					if (!existingCompareUpstream) {
-						this._throwError(message, vscode.l10n.t('No upstream for the compare branch.'));
+						this._throwError(message, vscode.l10n.t('No remote branch on {0}/{1} for the merge branch.', compareOwner, compareRepositoryName));
 						progress.report({ message: vscode.l10n.t('Pull request cancelled'), increment: 100 - totalIncrement });
 						return;
 					}

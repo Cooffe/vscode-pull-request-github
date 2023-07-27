@@ -11,12 +11,12 @@ import { CreatePullRequestViewProvider } from '../github/createPRViewProvider';
 import { CreatePullRequestViewProviderNew } from '../github/createPRViewProviderNew';
 import { FolderRepositoryManager, PullRequestDefaults } from '../github/folderRepositoryManager';
 import { PullRequestModel } from '../github/pullRequestModel';
-import { CompareChangesTreeProvider } from './compareChangesTreeDataProvider';
+import { CompareChanges } from './compareChangesTreeDataProvider';
 
 export class CreatePullRequestHelper implements vscode.Disposable {
 	private _disposables: vscode.Disposable[] = [];
 	private _createPRViewProvider: CreatePullRequestViewProvider | CreatePullRequestViewProviderNew | undefined;
-	private _treeView: CompareChangesTreeProvider | undefined;
+	private _treeView: CompareChanges | undefined;
 
 	private _onDidCreate = new vscode.EventEmitter<PullRequestModel>();
 	readonly onDidCreate: vscode.Event<PullRequestModel> = this._onDidCreate.event;
@@ -87,6 +87,42 @@ export class CreatePullRequestHelper implements vscode.Disposable {
 					return this._createPRViewProvider.addMilestone();
 				}
 			}),
+		);
+
+		this._disposables.push(
+			vscode.commands.registerCommand('pr.createPrMenuCreate', () => {
+				if (this._createPRViewProvider instanceof CreatePullRequestViewProviderNew) {
+					this._createPRViewProvider.createFromCommand(false, false, undefined);
+				}
+			})
+		);
+		this._disposables.push(
+			vscode.commands.registerCommand('pr.createPrMenuDraft', () => {
+				if (this._createPRViewProvider instanceof CreatePullRequestViewProviderNew) {
+					this._createPRViewProvider.createFromCommand(true, false, undefined);
+				}
+			})
+		);
+		this._disposables.push(
+			vscode.commands.registerCommand('pr.createPrMenuMerge', () => {
+				if (this._createPRViewProvider instanceof CreatePullRequestViewProviderNew) {
+					this._createPRViewProvider.createFromCommand(false, true, 'merge');
+				}
+			})
+		);
+		this._disposables.push(
+			vscode.commands.registerCommand('pr.createPrMenuSquash', () => {
+				if (this._createPRViewProvider instanceof CreatePullRequestViewProviderNew) {
+					this._createPRViewProvider.createFromCommand(false, true, 'squash');
+				}
+			})
+		);
+		this._disposables.push(
+			vscode.commands.registerCommand('pr.createPrMenuRebase', () => {
+				if (this._createPRViewProvider instanceof CreatePullRequestViewProviderNew) {
+					this._createPRViewProvider.createFromCommand(false, true, 'rebase');
+				}
+			})
 		);
 
 		if (usingCurrentBranchAsCompare) {
@@ -164,7 +200,7 @@ export class CreatePullRequestHelper implements vscode.Disposable {
 				);
 
 			const compareOrigin = await folderRepoManager.getOrigin(branch);
-			this._treeView = new CompareChangesTreeProvider(
+			this._treeView = new CompareChanges(
 				folderRepoManager.repository,
 				pullRequestDefaults.owner,
 				pullRequestDefaults.base,
