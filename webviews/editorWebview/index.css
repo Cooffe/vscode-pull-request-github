@@ -117,12 +117,13 @@ body .comment-container.review {
 
 .review-comment-container {
 	width: 100%;
+	max-width: 1000px;
 	display: flex;
 	flex-direction: column;
 	position: relative;
 }
 
-body .comment-container .review-comment-header:not(:last-child) {
+body #main > .comment-container > .review-comment-container > .review-comment-header:not(:nth-last-child(2)) {
 	border-bottom: 1px solid var(--vscode-editorHoverWidget-border);
 }
 
@@ -957,6 +958,7 @@ code {
 
 .review-comment-body .diff-container .diff {
 	border-top: 1px solid var(--vscode-editorWidget-border);
+	overflow: scroll;
 }
 
 .resolved-container {
