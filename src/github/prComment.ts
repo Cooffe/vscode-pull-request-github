@@ -186,7 +186,7 @@ export class TemporaryComment extends CommentBase {
 	}
 }
 
-const SUGGESTION_EXPRESSION = /```suggestion(\r\n|\n)([\s\S]*?)(\r\n|\n)```/;
+const SUGGESTION_EXPRESSION = /```suggestion(\r\n|\n)((?<suggestion>[\s\S]*?)(\r\n|\n))?```/;
 
 export class GHPRComment extends CommentBase {
 	public commentId: string;
@@ -229,7 +229,7 @@ export class GHPRComment extends CommentBase {
 			contextValues.push('canDelete');
 		}
 
-		if (this.suggestion) {
+		if (this.suggestion !== undefined) {
 			contextValues.push('hasSuggestion');
 		}
 
@@ -258,7 +258,7 @@ export class GHPRComment extends CommentBase {
 			contextValues.push('canDelete');
 		}
 
-		if (this.suggestion) {
+		if (this.suggestion !== undefined) {
 			contextValues.push('hasSuggestion');
 		}
 
@@ -286,9 +286,10 @@ export class GHPRComment extends CommentBase {
 	}
 
 	get suggestion(): string | undefined {
-		const suggestionBody = this.rawComment.body.match(SUGGESTION_EXPRESSION);
-		if (suggestionBody?.length === 4) {
-			return `${suggestionBody[2]}\n`;
+		const match = this.rawComment.body.match(SUGGESTION_EXPRESSION);
+		const suggestionBody = match?.groups?.suggestion;
+		if (match?.length === 5) {
+			return suggestionBody ? `${suggestionBody}\n` : '';
 		}
 	}
 
@@ -301,7 +302,7 @@ export class GHPRComment extends CommentBase {
 			return `***
 Suggested change:
 \`\`\`
-${args[1]}
+${args[2] ?? ''}
 \`\`\`
 ***`;
 		});
@@ -313,7 +314,10 @@ ${args[1]}
 		}
 
 		const expression = new RegExp(`https://github.com/${this.githubRepository.remote.owner}/${this.githubRepository.remote.repositoryName}/blob/([0-9a-f]{40})/(.*)#L([0-9]+)(-L([0-9]+))?`, 'g');
-		return stringReplaceAsync(body, expression, async (match: string, sha: string, file: string, start: string, _endGroup?: string, end?: string) => {
+		return stringReplaceAsync(body, expression, async (match: string, sha: string, file: string, start: string, _endGroup?: string, end?: string, index?: number) => {
+			if (index && (index > 0) && (body.charAt(index - 1) === '(')) {
+				return match;
+			}
 			const startLine = parseInt(start);
 			const endLine = end ? parseInt(end) : startLine + 1;
 			const lineContents = await this.githubRepository!.getLines(sha, file, startLine, endLine);
